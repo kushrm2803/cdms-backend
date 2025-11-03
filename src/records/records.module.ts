@@ -3,6 +3,7 @@ import { RecordsService } from './records.service';
 import { RecordsController } from './records.controller';
 import { MinioService } from './minio.service';
 import { VaultService } from './vault.service';
+import { FabricService } from './fabric.service';
 
 @Module({
   controllers: [RecordsController],
@@ -10,6 +11,7 @@ import { VaultService } from './vault.service';
     RecordsService,
     MinioService,
     VaultService,
+    FabricService,
   ],
 })
 export class RecordsModule {}
