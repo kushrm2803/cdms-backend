@@ -4,9 +4,10 @@ import {
   Gateway,
   GatewayOptions,
   Wallets,
-} from 'fabric-network'; // <-- Import Fabric classes
-import * as path from 'path'; // <-- Import Node.js path
-import * as fs from 'fs'; // <-- Import Node.js file system
+  X509Identity, // <-- Import this
+} from 'fabric-network';
+import * as path from 'path';
+import * as fs from 'fs';
 
 @Injectable()
 export class FabricService {
@@ -37,13 +38,54 @@ export class FabricService {
     // 3. Define the identity to use (our "ID card")
     const identity = 'Admin@org1.example.com';
 
-    // Check if the identity exists
-    if (!wallet.get(identity)) {
-      this.logger.error(`Identity ${identity} not found in wallet`);
-      throw new Error(`Identity ${identity} not found in wallet`);
-    }
+    // 4. --- THIS IS THE FIX ---
+    // Check if identity exists. If not, create it from our copied msp files.
+    const identityExists = await wallet.get(identity);
+    if (!identityExists) {
+      this.logger.warn(`Identity ${identity} not found. Attempting to import from msp...`);
 
-    // 4. Define the gateway connection options
+      try {
+        // Read the cert
+        const certPath = path.resolve(
+          walletPath,
+          'msp',
+          'signcerts',
+          'Admin@org1.example.com-cert.pem',
+        );
+        if (!fs.existsSync(certPath)) {
+          throw new Error(`Certificate not found: ${certPath}`);
+        }
+        const certificate = fs.readFileSync(certPath, 'utf8');
+
+        // Read the key
+        const keyDir = path.resolve(walletPath, 'msp', 'keystore');
+        const keyFiles = fs.readdirSync(keyDir);
+        const keyFile = keyFiles.find((file) => file.endsWith('_sk'));
+        if (!keyFile) {
+          throw new Error(`Private key not found in ${keyDir}`);
+        }
+        const keyPath = path.resolve(keyDir, keyFile);
+        const privateKey = fs.readFileSync(keyPath, 'utf8');
+
+        // Create the identity object
+        const mspId = 'Org1MSP'; // We know this from test-network
+        const newIdentity: X509Identity = {
+          credentials: { certificate, privateKey },
+          mspId: mspId,
+          type: 'X.509',
+        };
+
+        // Import the identity into the wallet
+        await wallet.put(identity, newIdentity);
+        this.logger.log(`Successfully imported identity ${identity} into wallet.`);
+      } catch (importError) {
+        this.logger.error('Failed to import identity from msp', importError);
+        throw new Error('Failed to setup Fabric identity.');
+      }
+    }
+    // --- END OF FIX ---
+
+    // 5. Define the gateway connection options
     const gatewayOptions: GatewayOptions = {
       wallet,
       identity: identity,
@@ -53,7 +95,7 @@ export class FabricService {
       },
     };
 
-    // 5. Connect to the gateway
+    // 6. Connect to the gateway
     const gateway = new Gateway();
     this.logger.log('Connecting to Fabric gateway...');
     await gateway.connect(ccp, gatewayOptions);
@@ -69,12 +111,7 @@ export class FabricService {
    */
   async testConnection(): Promise<string> {
     this.logger.log('Testing Fabric connection...');
-    
-    // --- THIS IS THE FIX ---
-    // Initialize 'gateway' as undefined so TypeScript knows it can be
-    // in that state in the 'finally' block.
     let gateway: Gateway | undefined = undefined;
-    // --- END OF FIX ---
 
     try {
       // Connect and get the contract
