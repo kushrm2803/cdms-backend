@@ -1,8 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Gateway, GatewayOptions, Wallets } from 'fabric-network';
-import * as path from 'path';
-import * as fs from 'fs';
+import {
+  Gateway,
+  GatewayOptions,
+  Wallets,
+} from 'fabric-network'; // <-- Import Fabric classes
+import * as path from 'path'; // <-- Import Node.js path
+import * as fs from 'fs'; // <-- Import Node.js file system
 
 @Injectable()
 export class FabricService {
@@ -11,17 +15,12 @@ export class FabricService {
   constructor(private readonly configService: ConfigService) {}
 
   /**
-   * Connects to the Fabric gateway using the 'appUser' identity.
+   * Connects to the Fabric gateway
+   * @returns A connected gateway, the network, and the contract
    */
-  private async connect(): Promise<Gateway> {
+  private async connect() {
     // 1. Setup the wallet
-    const walletPath = path.resolve(
-      __dirname,
-      '..',
-      '..',
-      'fabric-config',
-      'wallet',
-    );
+    const walletPath = path.resolve(__dirname, '..', '..', 'fabric-config', 'wallet');
     const wallet = await Wallets.newFileSystemWallet(walletPath);
     this.logger.log(`Wallet path: ${walletPath}`);
 
@@ -35,32 +34,26 @@ export class FabricService {
     );
     const ccp = JSON.parse(fs.readFileSync(ccpPath, 'utf8'));
 
-    // 3. Define the identity to use (THE FIX)
-    // We use 'appUser', which was properly registered and enrolled.
-    const identity = 'appUser';
+    // 3. Define the identity to use (our "ID card")
+    const identity = 'Admin@org1.example.com';
 
-    this.logger.log(`--- VERIFYING IDENTITY: ${identity} ---`);
-    // 4. Check if 'appUser' identity exists in the wallet
-    const identityExists = await wallet.get(identity);
-    if (!identityExists) {
-      this.logger.error(`Identity ${identity} not found in wallet.`);
-      this.logger.error(
-        'Please ensure you have run enrollAdmin.js and registerUser.js from the fabcar/javascript sample',
-      );
-      throw new Error('Failed to setup Fabric identity.');
+    // Check if the identity exists
+    if (!wallet.get(identity)) {
+      this.logger.error(`Identity ${identity} not found in wallet`);
+      throw new Error(`Identity ${identity} not found in wallet`);
     }
 
-    // 5. Define the gateway connection options
+    // 4. Define the gateway connection options
     const gatewayOptions: GatewayOptions = {
       wallet,
       identity: identity,
       discovery: {
-        enabled: false,
-        asLocalhost: false,
+        enabled: true,
+        asLocalhost: true, // This is key for connecting Windows -> WSL 2
       },
     };
 
-    // 6. Connect to the gateway
+    // 5. Connect to the gateway
     const gateway = new Gateway();
     this.logger.log('Connecting to Fabric gateway...');
     await gateway.connect(ccp, gatewayOptions);
@@ -71,21 +64,27 @@ export class FabricService {
 
   /**
    * This is a simple test function.
-   * It calls the 'QueryAllCars' function on the 'fabcar' chaincode.
+   * It calls the 'GetAllAssets' function on the 'basic' chaincode.
+   * This proves our entire connection (map, ID card) works.
    */
   async testConnection(): Promise<string> {
     this.logger.log('Testing Fabric connection...');
+    
+    // --- THIS IS THE FIX ---
+    // Initialize 'gateway' as undefined so TypeScript knows it can be
+    // in that state in the 'finally' block.
     let gateway: Gateway | undefined = undefined;
+    // --- END OF FIX ---
 
     try {
       // Connect and get the contract
       gateway = await this.connect();
       const network = await gateway.getNetwork('mychannel');
-      const contract = network.getContract('fabcar');
+      const contract = network.getContract('basic');
 
-      // Call the 'QueryAllCars' function
-      this.logger.log("Evaluating 'QueryAllCars' transaction...");
-      const result = await contract.evaluateTransaction('QueryAllCars');
+      // Call the 'GetAllAssets' function
+      this.logger.log("Evaluating 'GetAllAssets' transaction...");
+      const result = await contract.evaluateTransaction('GetAllAssets');
 
       this.logger.log('Fabric test successful. Result:', result.toString());
       return result.toString();
@@ -100,15 +99,4 @@ export class FabricService {
       }
     }
   }
-
-  // You can add your other chaincode functions here,
-  // for example, 'createRecord', 'queryRecord', etc.
-  //
-  // async createRecord(id: string, data: string) {
-  //   const gateway = await this.connect();
-  //   const network = await gateway.getNetwork('mychannel');
-  //   const contract = network.getContract('fabcar');
-  //   await contract.submitTransaction('CreateCar', id, data...);
-  //   gateway.disconnect();
-  // }
 }
