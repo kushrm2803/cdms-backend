@@ -38,7 +38,7 @@ export class VaultService {
 
   /**
    * Decrypts ciphertext from Vault's transit engine.
-   * @param ciphertext The encrypted string
+   * @param ciphertext The encrypted string (from the file)
    * @returns The plaintext data (as a Buffer)
    */
   async decrypt(ciphertext: string): Promise<Buffer> {

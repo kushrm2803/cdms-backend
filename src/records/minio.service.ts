@@ -49,4 +49,23 @@ export class MinioService {
       })
       .promise();
   }
+
+  /**
+   * Downloads a file from the MinIO bucket
+   * @param fileKey The unique key of the file (e.g., '...uuid...jpg.enc')
+   * @returns The file as a Buffer
+   */
+  async download(fileKey: string): Promise<Buffer> {
+    this.logger.log(`Downloading file '${fileKey}' from bucket '${this.bucketName}'...`);
+
+    const result = await this.s3
+      .getObject({
+        Bucket: this.bucketName,
+        Key: fileKey,
+      })
+      .promise();
+
+    // The result.Body is a Buffer
+    return result.Body as Buffer;
+  }
 }

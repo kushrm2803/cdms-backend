@@ -21,7 +21,7 @@ export class RecordsService {
 
   async create(file: Express.Multer.File, createRecordDto: CreateRecordDto) {
     this.logger.log('--- In Records Service (Real CreateRecord Flow) ---');
-    
+
     // We'll hard-code the creating org as Org1 for now
     const orgMspId = 'Org1MSP';
 
@@ -52,8 +52,14 @@ export class RecordsService {
 
       // 5. Generate IDs
       const newRecordId = uuid();
-      const newPolicyId = `policy-${uuid()}`;
       const createdAt = new Date().toISOString();
+
+      // --- THIS IS THE FIX ---
+      // Use the policyId from Postman if it exists,
+      // otherwise, create a new random one.
+      const newPolicyId = createRecordDto.policyId || `policy-${uuid()}`;
+      this.logger.log(`Using Policy ID: ${newPolicyId}`);
+      // --- END OF FIX ---
 
       // 6. Create payload
       const fabricPayload: RecordPayload = {
@@ -63,7 +69,7 @@ export class RecordsService {
         fileHash: fileHash,
         offChainUri: uploadResult.Key,
         createdAt: createdAt,
-        policyId: newPolicyId,
+        policyId: newPolicyId, // <-- Use the final policyId
       };
 
       // 7. Submit to Fabric
@@ -73,7 +79,10 @@ export class RecordsService {
 
       // 8. Query to verify
       this.logger.log(`Querying Fabric as ${orgMspId} to verify...`);
-      const queryResult = await this.fabricService.queryRecord(newRecordId, orgMspId);
+      const queryResult = await this.fabricService.queryRecord(
+        newRecordId,
+        orgMspId,
+      );
       this.logger.log('Fabric query successful.');
 
       return {
@@ -123,8 +132,41 @@ export class RecordsService {
   findAll() {
     return `This action returns all records`;
   }
-  findOne(id: number) {
-    return `This action returns a #${id} record`;
+  async findOne(id: string, orgMspId: 'Org1MSP' | 'Org2MSP') {
+    // <-- IT'S NOW AN ARGUMENT
+    this.logger.log(
+      `--- In Records Service (Secure FindOne Flow for ${orgMspId}) ---`,
+    );
+
+    try {
+      // 1. Query the blockchain (This will fail if policy denies access)
+      this.logger.log(`Querying Fabric for record ${id} as ${orgMspId}...`);
+      // We use the orgMspId variable that was passed in
+      const recordJSON = await this.fabricService.queryRecord(id, orgMspId);
+      const record = JSON.parse(recordJSON);
+      this.logger.log('Access granted by Fabric.');
+
+      // 2. Download the encrypted file from MinIO
+      this.logger.log(`Downloading file ${record.offChainUri} from MinIO...`);
+      const encryptedFileBuffer = await this.minioService.download(
+        record.offChainUri,
+      );
+      this.logger.log('File downloaded.');
+
+      // 3. Decrypt the file using Vault
+      this.logger.log('Decrypting file with Vault...');
+      const encryptedFileString = encryptedFileBuffer.toString();
+      const decryptedFile =
+        await this.vaultService.decrypt(encryptedFileString);
+      this.logger.log('File decrypted.');
+
+      // 4. Return the decrypted file and the record metadata
+      return { decryptedFile: decryptedFile, record: record };
+    } catch (error) {
+      this.logger.error(`Failed the findOne flow for record ${id}`, error);
+      // Re-throw the error so the controller can handle it
+      throw error;
+    }
   }
   update(id: number, updateRecordDto: UpdateRecordDto) {
     return `This action updates a #${id} record`;
