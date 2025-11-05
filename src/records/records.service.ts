@@ -4,9 +4,10 @@ import { UpdateRecordDto } from './dto/update-record.dto';
 import type { Express } from 'express';
 import { MinioService } from './minio.service';
 import { VaultService } from './vault.service';
-import { FabricService } from './fabric.service';
+import { FabricService, RecordPayload } from './fabric.service';
 import * as path from 'path';
 import { createHash } from 'crypto';
+import { v4 as uuid } from 'uuid';
 
 @Injectable()
 export class RecordsService {
@@ -19,18 +20,21 @@ export class RecordsService {
   ) {}
 
   async create(file: Express.Multer.File, createRecordDto: CreateRecordDto) {
-    this.logger.log('--- In Records Service (Full E2E Flow) ---');
-    this.logger.log('Received file:', file.originalname);
+    this.logger.log('--- In Records Service (Real CreateRecord Flow) ---');
+    
+    // We'll hard-code the creating org as Org1 for now
+    const orgMspId = 'Org1MSP';
 
     try {
+      // 1. Encrypt
       this.logger.log('Encrypting file with Vault...');
       const ciphertext = await this.vaultService.encrypt(file.buffer);
-      this.logger.log('File encrypted successfully by Vault.');
-
       const encryptedFileBuffer = Buffer.from(ciphertext);
 
+      // 2. Get file details
       const fileExtension = path.extname(file.originalname);
 
+      // 3. Upload to MinIO
       const encryptedFile = {
         buffer: encryptedFileBuffer,
         mimetype: 'application/octet-stream',
@@ -40,28 +44,43 @@ export class RecordsService {
         encryptedFile as Express.Multer.File,
         fileExtension + '.enc',
       );
-      this.logger.log('Encrypted file uploaded to MinIO.', uploadResult);
+      this.logger.log('Encrypted file uploaded to MinIO.', uploadResult.Key);
 
-      this.logger.log('Calculating SHA-256 hash of original file...');
+      // 4. Get hash of *original* file
       const fileHash = createHash('sha256').update(file.buffer).digest('hex');
       this.logger.log(`File hash: ${fileHash}`);
 
-      this.logger.log('Testing Fabric connection...');
-      const fabricTestResult = await this.fabricService.testConnection();
-      this.logger.log('Fabric connection test successful.');
+      // 5. Generate IDs
+      const newRecordId = uuid();
+      const newPolicyId = `policy-${uuid()}`;
+      const createdAt = new Date().toISOString();
 
-      // 7. TODO (Future): Replace testConnection() with a real chaincode call
-      //    const fabricResponse = await this.fabricService.createRecord({
-      //      ...createRecordDto,
-      //      fileHash: fileHash,
-      //      minioPath: uploadResult.Key,
-      //    });
+      // 6. Create payload
+      const fabricPayload: RecordPayload = {
+        id: newRecordId,
+        caseId: createRecordDto.caseId,
+        recordType: createRecordDto.recordType,
+        fileHash: fileHash,
+        offChainUri: uploadResult.Key,
+        createdAt: createdAt,
+        policyId: newPolicyId,
+      };
+
+      // 7. Submit to Fabric
+      this.logger.log(`Submitting record to Fabric as ${orgMspId}...`);
+      await this.fabricService.createRecord(fabricPayload, orgMspId);
+      this.logger.log('Fabric transaction successful.');
+
+      // 8. Query to verify
+      this.logger.log(`Querying Fabric as ${orgMspId} to verify...`);
+      const queryResult = await this.fabricService.queryRecord(newRecordId, orgMspId);
+      this.logger.log('Fabric query successful.');
 
       return {
-        message: 'File encrypted, uploaded, and Fabric connection tested!',
-        fileHash: fileHash,
-        minioResponse: uploadResult,
-        fabricTestResponse: JSON.parse(fabricTestResult),
+        message: 'Record created, encrypted, stored, and logged on blockchain!',
+        recordId: newRecordId,
+        minioPath: uploadResult.Key,
+        recordData: JSON.parse(queryResult),
       };
     } catch (error) {
       this.logger.error('Failed the create flow', error);
@@ -69,6 +88,38 @@ export class RecordsService {
     }
   }
 
+  /**
+   * --- FIX: UPDATED createPolicy to call the v4 service ---
+   */
+  async createPolicy(policyData: any) {
+    this.logger.log('--- In Records Service (CreatePolicy Flow) ---');
+    const orgMspId = 'Org1MSP'; // Admin action
+
+    try {
+      const categoriesJSON = JSON.stringify(policyData.categories);
+      const rulesJSON = JSON.stringify(policyData.rules);
+      const policyId = policyData.policyId;
+
+      this.logger.log(`Submitting policy ${policyId} to Fabric...`);
+      await this.fabricService.createPolicy(
+        policyId,
+        categoriesJSON,
+        rulesJSON,
+        orgMspId,
+      );
+      this.logger.log('Fabric transaction successful.');
+
+      return {
+        message: 'Policy created successfully on the blockchain!',
+        policyId: policyId,
+      };
+    } catch (error) {
+      this.logger.error('Failed the create policy flow', error);
+      throw new Error('Failed to create policy.');
+    }
+  }
+
+  // --- Keep the other generated methods as-is ---
   findAll() {
     return `This action returns all records`;
   }
