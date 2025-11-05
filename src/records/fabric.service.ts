@@ -4,26 +4,52 @@ import {
   Gateway,
   GatewayOptions,
   Wallets,
-  X509Identity, // <-- Import this
+  X509Identity,
 } from 'fabric-network';
 import * as path from 'path';
 import * as fs from 'fs';
 
+// Define our org types
+type OrgMspId = 'Org1MSP' | 'Org2MSP';
+
+// This is the data structure we defined in our chaincode
+export interface RecordPayload {
+  id: string;
+  caseId: string;
+  recordType: string;
+  fileHash: string;
+  offChainUri: string;
+  createdAt: string;
+  policyId: string;
+}
+
 @Injectable()
 export class FabricService {
   private readonly logger = new Logger(FabricService.name);
+  private readonly chaincodeName = 'cdms'; // Use our new chaincode name
+  private readonly channelName = 'mychannel';
+  private readonly walletPath: string;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) {
+    // Define the wallet path once
+    this.walletPath = path.resolve(__dirname, '..', '..', 'fabric-config', 'wallet');
+  }
 
   /**
-   * Connects to the Fabric gateway
-   * @returns A connected gateway, the network, and the contract
+   * Connects to the Fabric gateway using a specific org's identity
    */
-  private async connect() {
+  /**
+   * Connects to the Fabric gateway using a specific org's identity
+   */
+  private async connect(
+    identityName: string,
+    mspId: OrgMspId,
+    mspDir: string,
+  ): Promise<Gateway> {
+    
     // 1. Setup the wallet
-    const walletPath = path.resolve(__dirname, '..', '..', 'fabric-config', 'wallet');
-    const wallet = await Wallets.newFileSystemWallet(walletPath);
-    this.logger.log(`Wallet path: ${walletPath}`);
+    const wallet = await Wallets.newFileSystemWallet(this.walletPath);
+    this.logger.log(`Wallet path: ${this.walletPath}`);
 
     // 2. Setup the connection profile (the "map")
     const ccpPath = path.resolve(
@@ -31,107 +57,148 @@ export class FabricService {
       '..',
       '..',
       'fabric-config',
-      'connection-org1.json',
+      'connection-org1.json', // We always use our "Super Map"
     );
     const ccp = JSON.parse(fs.readFileSync(ccpPath, 'utf8'));
 
-    // 3. Define the identity to use (our "ID card")
-    const identity = 'Admin@org1.example.com';
-
-    // 4. --- THIS IS THE FIX ---
-    // Check if identity exists. If not, create it from our copied msp files.
-    const identityExists = await wallet.get(identity);
+    // 3. Check if identity exists. If not, create it from our new msps folder
+    const identityExists = await wallet.get(identityName);
     if (!identityExists) {
-      this.logger.warn(`Identity ${identity} not found. Attempting to import from msp...`);
-
+      this.logger.warn(`Identity ${identityName} not found. Attempting to import...`);
       try {
-        // Read the cert
-        const certPath = path.resolve(
-          walletPath,
-          'msp',
-          'signcerts',
-          'Admin@org1.example.com-cert.pem',
+        
+        // --- THIS IS THE FIX ---
+        // The mspFolderPath is now inside the walletPath
+        const mspFolderPath = path.resolve(
+          this.walletPath, // <-- Use the walletPath variable
+          'msps',
+          mspDir,
         );
-        if (!fs.existsSync(certPath)) {
-          throw new Error(`Certificate not found: ${certPath}`);
-        }
+        // --- END OF FIX ---
+
+        const certPath = path.resolve(
+          mspFolderPath,
+          'signcerts',
+          fs.readdirSync(path.resolve(mspFolderPath, 'signcerts'))[0], // Get the first cert file
+        );
         const certificate = fs.readFileSync(certPath, 'utf8');
 
-        // Read the key
-        const keyDir = path.resolve(walletPath, 'msp', 'keystore');
-        const keyFiles = fs.readdirSync(keyDir);
-        const keyFile = keyFiles.find((file) => file.endsWith('_sk'));
+        const keyDir = path.resolve(mspFolderPath, 'keystore');
+        const keyFile = fs.readdirSync(keyDir).find((file) => file.endsWith('_sk'));
         if (!keyFile) {
           throw new Error(`Private key not found in ${keyDir}`);
         }
         const keyPath = path.resolve(keyDir, keyFile);
         const privateKey = fs.readFileSync(keyPath, 'utf8');
 
-        // Create the identity object
-        const mspId = 'Org1MSP'; // We know this from test-network
         const newIdentity: X509Identity = {
           credentials: { certificate, privateKey },
           mspId: mspId,
           type: 'X.509',
         };
 
-        // Import the identity into the wallet
-        await wallet.put(identity, newIdentity);
-        this.logger.log(`Successfully imported identity ${identity} into wallet.`);
+        await wallet.put(identityName, newIdentity);
+        this.logger.log(`Successfully imported identity ${identityName} into wallet.`);
       } catch (importError) {
-        this.logger.error('Failed to import identity from msp', importError);
+        this.logger.error('Failed to import identity', importError);
         throw new Error('Failed to setup Fabric identity.');
       }
     }
-    // --- END OF FIX ---
 
-    // 5. Define the gateway connection options
+    // 4. Define the gateway connection options
     const gatewayOptions: GatewayOptions = {
       wallet,
-      identity: identity,
+      identity: identityName,
       discovery: {
-        enabled: true,
-        asLocalhost: true, // This is key for connecting Windows -> WSL 2
+        enabled: false, // We use our "Super Map"
+        asLocalhost: false,
       },
     };
 
-    // 6. Connect to the gateway
+    // 5. Connect to the gateway
     const gateway = new Gateway();
-    this.logger.log('Connecting to Fabric gateway...');
+    this.logger.log(`Connecting to Fabric gateway as ${identityName}...`);
     await gateway.connect(ccp, gatewayOptions);
     this.logger.log('Successfully connected to gateway.');
 
     return gateway;
   }
 
+  // Helper to get connection details based on OrgMspId
+  private getConnectionDetails(orgMspId: OrgMspId) {
+    if (orgMspId === 'Org1MSP') {
+      return {
+        identityName: 'Admin@org1.example.com',
+        mspDir: 'org1',
+      };
+    } else if (orgMspId === 'Org2MSP') {
+      return {
+        identityName: 'Admin@org2.example.com',
+        mspDir: 'org2',
+      };
+    }
+    throw new Error(`Invalid organization MSP: ${orgMspId}`);
+  }
+
   /**
-   * This is a simple test function.
-   * It calls the 'GetAllAssets' function on the 'basic' chaincode.
-   * This proves our entire connection (map, ID card) works.
+   * Submits the CreateRecord transaction as a specific org
    */
-  async testConnection(): Promise<string> {
-    this.logger.log('Testing Fabric connection...');
+  async createRecord(payload: RecordPayload, orgMspId: OrgMspId): Promise<void> {
+    this.logger.log(`Submitting 'CreateRecord' as ${orgMspId} for ID: ${payload.id}`);
     let gateway: Gateway | undefined = undefined;
+    const { identityName, mspDir } = this.getConnectionDetails(orgMspId);
 
     try {
-      // Connect and get the contract
-      gateway = await this.connect();
-      const network = await gateway.getNetwork('mychannel');
-      const contract = network.getContract('basic');
+      gateway = await this.connect(identityName, orgMspId, mspDir);
+      const network = await gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
 
-      // Call the 'GetAllAssets' function
-      this.logger.log("Evaluating 'GetAllAssets' transaction...");
-      const result = await contract.evaluateTransaction('GetAllAssets');
+      await contract.submitTransaction(
+        'CreateRecord',
+        payload.id,
+        payload.caseId,
+        payload.recordType,
+        payload.fileHash,
+        payload.offChainUri,
+        payload.createdAt,
+        payload.policyId,
+      );
 
-      this.logger.log('Fabric test successful. Result:', result.toString());
-      return result.toString();
+      this.logger.log(`Transaction 'CreateRecord' committed successfully by ${orgMspId}.`);
     } catch (error) {
-      this.logger.error('Failed to test Fabric connection', error);
+      this.logger.error(`Failed to submit 'CreateRecord' as ${orgMspId}`, error);
       throw error;
     } finally {
-      // Always disconnect the gateway
       if (gateway) {
-        await gateway.disconnect();
+        gateway.disconnect();
+        this.logger.log('Disconnected from Fabric gateway.');
+      }
+    }
+  }
+
+  /**
+   * Queries a record as a specific org
+   */
+  async queryRecord(id: string, orgMspId: OrgMspId): Promise<string> {
+    this.logger.log(`Evaluating 'QueryRecord' as ${orgMspId} for ID: ${id}`);
+    let gateway: Gateway | undefined = undefined;
+    const { identityName, mspDir } = this.getConnectionDetails(orgMspId);
+
+    try {
+      gateway = await this.connect(identityName, orgMspId, mspDir);
+      const network = await gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+
+      const result = await contract.evaluateTransaction('QueryRecord', id);
+
+      this.logger.log(`Transaction 'QueryRecord' evaluated successfully by ${orgMspId}.`);
+      return result.toString();
+    } catch (error) {
+      this.logger.error(`Failed to evaluate 'QueryRecord' as ${orgMspId}`, error);
+      throw error;
+    } finally {
+      if (gateway) {
+        gateway.disconnect();
         this.logger.log('Disconnected from Fabric gateway.');
       }
     }
