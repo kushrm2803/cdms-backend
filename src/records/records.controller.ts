@@ -9,17 +9,20 @@ import {
   UseInterceptors,
   UploadedFile,
   Logger,
-  Res, // <-- Import this
-  StreamableFile, // <-- Import this
-  ForbiddenException, // <-- Import this
-  Query
+  Res,
+  StreamableFile,
+  ForbiddenException,
+  Query,
+  Put
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Express } from 'express';
 import { RecordsService } from './records.service';
 import { CreateRecordDto } from './dto/create-record.dto';
 import { UpdateRecordDto } from './dto/update-record.dto';
-import type { Response } from 'express'; // <-- Import the express Response type
+import { SearchRecordsDto } from './dto/search-records.dto';
+import { UpdateMetadataDto } from './dto/update-metadata.dto';
+import type { Response } from 'express';
 
 @Controller('records')
 export class RecordsController {
@@ -87,5 +90,27 @@ export class RecordsController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.recordsService.remove(+id);
+  }
+
+  @Get('case/:caseId')
+  async getRecordsByCase(
+    @Param('caseId') caseId: string,
+    @Query('org') orgMspId: 'Org1MSP' | 'Org2MSP',
+  ) {
+    return this.recordsService.getRecordsByCase(caseId, orgMspId);
+  }
+
+  @Get('search')
+  async searchRecords(@Query() searchParams: SearchRecordsDto) {
+    return this.recordsService.searchRecords(searchParams);
+  }
+
+  @Put(':id/metadata')
+  async updateRecordMetadata(
+    @Param('id') id: string,
+    @Body() metadata: UpdateMetadataDto,
+    @Query('org') orgMspId: 'Org1MSP' | 'Org2MSP',
+  ) {
+    return this.recordsService.updateMetadata(id, metadata, orgMspId);
   }
 }

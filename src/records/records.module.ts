@@ -13,5 +13,10 @@ import { FabricService } from './fabric.service';
     VaultService,
     FabricService,
   ],
+  exports: [
+    FabricService,
+    MinioService,
+    VaultService,
+  ],
 })
 export class RecordsModule {}

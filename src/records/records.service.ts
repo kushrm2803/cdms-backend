@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CreateRecordDto } from './dto/create-record.dto';
 import { UpdateRecordDto } from './dto/update-record.dto';
+import { SearchRecordsDto } from './dto/search-records.dto';
+import { UpdateMetadataDto } from './dto/update-metadata.dto';
 import type { Express } from 'express';
 import { MinioService } from './minio.service';
 import { VaultService } from './vault.service';
@@ -68,6 +70,7 @@ export class RecordsService {
         recordType: createRecordDto.recordType,
         fileHash: fileHash,
         offChainUri: uploadResult.Key,
+        ownerOrg: createRecordDto.ownerOrg,
         createdAt: createdAt,
         policyId: newPolicyId, // <-- Use the final policyId
       };
@@ -173,5 +176,45 @@ export class RecordsService {
   }
   remove(id: number) {
     return `This action removes a #${id} record`;
+  }
+
+  async getRecordsByCase(caseId: string, orgMspId: 'Org1MSP' | 'Org2MSP') {
+    this.logger.log(`Getting records for case ${caseId} as ${orgMspId}`);
+    try {
+      // Need to add QueryRecordsByCase to fabric.service.ts
+      const records = await this.fabricService.queryRecordsByCase(caseId, orgMspId);
+      return JSON.parse(records);
+    } catch (error) {
+      this.logger.error(`Failed to get records for case ${caseId}`, error);
+      throw error;
+    }
+  }
+
+  async searchRecords(searchParams: SearchRecordsDto) {
+    this.logger.log('Searching records with params:', searchParams);
+    try {
+      // Need to add QueryRecords to fabric.service.ts
+      const records = await this.fabricService.queryRecords(searchParams);
+      return JSON.parse(records);
+    } catch (error) {
+      this.logger.error('Failed to search records', error);
+      throw error;
+    }
+  }
+
+  async updateMetadata(
+    id: string, 
+    metadata: UpdateMetadataDto, 
+    orgMspId: 'Org1MSP' | 'Org2MSP'
+  ) {
+    this.logger.log(`Updating metadata for record ${id} as ${orgMspId}`);
+    try {
+      // Need to add UpdateRecordMetadata to fabric.service.ts
+      await this.fabricService.updateRecordMetadata(id, metadata, orgMspId);
+      return { message: 'Record metadata updated successfully' };
+    } catch (error) {
+      this.logger.error(`Failed to update metadata for record ${id}`, error);
+      throw error;
+    }
   }
 }
