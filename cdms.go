@@ -26,16 +26,14 @@ type Record struct {
     PolicyID    string `json:"policyId"`
 }
 
-type Rule struct {
-    Allow map[string]interface{} `json:"allow,omitempty"`
-    Deny  map[string]interface{} `json:"deny,omitempty"`
-}
+// (rules removed) Using simplified policy: AllowedOrgs and AllowedRoles arrays
 
 type Policy struct {
     DocType    string   `json:"docType"`
     PolicyID   string   `json:"policyId"`
     Categories []string `json:"categories"`
-    Rules      []Rule   `json:"rules"`
+    AllowedOrgs  []string `json:"allowedOrgs,omitempty"`
+    AllowedRoles []string `json:"allowedRoles,omitempty"`
     CreatedAt  string   `json:"createdAt"`
     CreatedBy  string   `json:"createdBy"`
 }
@@ -74,8 +72,8 @@ type Case struct {
 
 // --------------------------- POLICIES --------------------------------
 
-// CreatePolicy creates a policy. categoriesJSON and rulesJSON are JSON strings.
-func (s *SmartContract) CreatePolicy(ctx contractapi.TransactionContextInterface, policyId string, categoriesJSON string, rulesJSON string) error {
+// CreatePolicy creates a policy. categoriesJSON, allowedOrgsJSON and allowedRolesJSON are JSON strings.
+func (s *SmartContract) CreatePolicy(ctx contractapi.TransactionContextInterface, policyId string, categoriesJSON string, allowedOrgsJSON string, allowedRolesJSON string) error {
     key := "policy:" + policyId
     exists, err := ctx.GetStub().GetState(key)
     if err != nil {
@@ -90,9 +88,14 @@ func (s *SmartContract) CreatePolicy(ctx contractapi.TransactionContextInterface
         return fmt.Errorf("failed to unmarshal categories JSON: %v", err)
     }
 
-    var rules []Rule
-    if err := json.Unmarshal([]byte(rulesJSON), &rules); err != nil {
-        return fmt.Errorf("failed to unmarshal rules JSON: %v", err)
+    var allowedOrgs []string
+    if err := json.Unmarshal([]byte(allowedOrgsJSON), &allowedOrgs); err != nil {
+        return fmt.Errorf("failed to unmarshal allowedOrgs JSON: %v", err)
+    }
+
+    var allowedRoles []string
+    if err := json.Unmarshal([]byte(allowedRolesJSON), &allowedRoles); err != nil {
+        return fmt.Errorf("failed to unmarshal allowedRoles JSON: %v", err)
     }
 
     clientMSPID, _ := ctx.GetClientIdentity().GetMSPID()
@@ -101,7 +104,8 @@ func (s *SmartContract) CreatePolicy(ctx contractapi.TransactionContextInterface
         DocType:    "policy",
         PolicyID:   policyId,
         Categories: categories,
-        Rules:      rules,
+        AllowedOrgs:  allowedOrgs,
+        AllowedRoles: allowedRoles,
         CreatedBy:  clientMSPID,
         CreatedAt:  "auto-generated",
     }
@@ -129,17 +133,7 @@ func (s *SmartContract) QueryPolicy(ctx contractapi.TransactionContextInterface,
         return nil, err
     }
 
-    // --- FIX for chaincode API validator ---
-    // Initialize nil maps to empty maps before returning
-    for i := range policy.Rules {
-        if policy.Rules[i].Allow == nil {
-            policy.Rules[i].Allow = make(map[string]interface{})
-        }
-        if policy.Rules[i].Deny == nil {
-            policy.Rules[i].Deny = make(map[string]interface{})
-        }
-    }
-    // --- END FIX ---
+    // No additional normalization required for simplified policy
 
     return &policy, nil
 }
@@ -168,19 +162,10 @@ func (s *SmartContract) QueryAllPolicies(ctx contractapi.TransactionContextInter
             return nil, err
         }
 
-        // --- FIX for chaincode API validator ---
-        for i := range p.Rules {
-            if p.Rules[i].Allow == nil {
-                p.Rules[i].Allow = make(map[string]interface{})
+            // simplified policy object - just append if docType matches
+            if p.DocType == "policy" {
+                policies = append(policies, &p)
             }
-            if p.Rules[i].Deny == nil {
-                p.Rules[i].Deny = make(map[string]interface{})
-            }
-        }
-        
-        if p.DocType == "policy" {
-             policies = append(policies, &p)
-        }
     }
     return policies, nil
 }
@@ -453,30 +438,26 @@ func (s *SmartContract) QueryRecord(ctx contractapi.TransactionContextInterface,
         return nil, fmt.Errorf("failed to get policy %s: %v", rec.PolicyID, err)
     }
 
-    // Check if org has access according to policy
-    hasAccess := false
-    for _, rule := range policy.Rules {
-        // Check deny rules first - they override allow rules
-        if rule.Deny != nil {
-            if org, exists := rule.Deny["org"]; exists {
-                if org == clientMSPID || org == "*" {
-                    return nil, fmt.Errorf("access denied by policy for organization %s", clientMSPID)
-                }
-            }
-        }
-        // Check allow rules
-        if rule.Allow != nil {
-            if org, exists := rule.Allow["org"]; exists {
-                if org == clientMSPID || org == "*" {
-                    hasAccess = true
-                    break
-                }
-            }
+    // Check access using simplified policy: require org AND role to match allowed lists
+    orgAllowed := false
+    roleAllowed := false
+
+    for _, o := range policy.AllowedOrgs {
+        if o == clientMSPID || o == "*" {
+            orgAllowed = true
+            break
         }
     }
 
-    if !hasAccess {
-        return nil, fmt.Errorf("organization %s not allowed by policy to access record %s", clientMSPID, id)
+    for _, r := range policy.AllowedRoles {
+        if r == userRole || r == "*" {
+            roleAllowed = true
+            break
+        }
+    }
+
+    if !(orgAllowed && roleAllowed) {
+        return nil, fmt.Errorf("access denied by policy for organization %s and role %s", clientMSPID, userRole)
     }
 
     return &rec, nil
@@ -523,31 +504,16 @@ func (s *SmartContract) QueryRecordsByCase(ctx contractapi.TransactionContextInt
                 continue // Skip if policy can't be retrieved
             }
 
-            // Check if org has access according to policy
+            // Check if org is allowed by simplified policy (role not available here)
             hasAccess := false
-            denied := false
-            for _, rule := range policy.Rules {
-                // Check deny rules first
-                if rule.Deny != nil {
-                    if org, exists := rule.Deny["org"]; exists {
-                        if org == clientMSPID || org == "*" {
-                            denied = true
-                            break
-                        }
-                    }
-                }
-                // Check allow rules
-                if rule.Allow != nil {
-                    if org, exists := rule.Allow["org"]; exists {
-                        if org == clientMSPID || org == "*" {
-                            hasAccess = true
-                            break
-                        }
-                    }
+            for _, o := range policy.AllowedOrgs {
+                if o == clientMSPID || o == "*" {
+                    hasAccess = true
+                    break
                 }
             }
 
-            if !denied && hasAccess {
+            if hasAccess {
                 records = append(records, &r)
             }
         }
@@ -600,31 +566,16 @@ func (s *SmartContract) QueryRecords(ctx contractapi.TransactionContextInterface
                 continue // Skip if policy can't be retrieved
             }
 
-            // Check if org has access according to policy
+            // Check if org is allowed by simplified policy (role not available here)
             hasAccess := false
-            denied := false
-            for _, rule := range policy.Rules {
-                // Check deny rules first
-                if rule.Deny != nil {
-                    if org, exists := rule.Deny["org"]; exists {
-                        if org == clientMSPID || org == "*" {
-                            denied = true
-                            break
-                        }
-                    }
-                }
-                // Check allow rules
-                if rule.Allow != nil {
-                    if org, exists := rule.Allow["org"]; exists {
-                        if org == clientMSPID || org == "*" {
-                            hasAccess = true
-                            break
-                        }
-                    }
+            for _, o := range policy.AllowedOrgs {
+                if o == clientMSPID || o == "*" {
+                    hasAccess = true
+                    break
                 }
             }
 
-            if !denied && hasAccess {
+            if hasAccess {
                 records = append(records, &r)
             }
         }

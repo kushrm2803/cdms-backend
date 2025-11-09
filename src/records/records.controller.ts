@@ -20,6 +20,7 @@ import {
   Request
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { normalizeOrgMspId } from '../utils/normalizers';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Express } from 'express';
 import { RecordsService } from './records.service';
@@ -45,10 +46,11 @@ export class RecordsController {
   async create(
     @UploadedFile() file: Express.Multer.File,
     @Body() createRecordDto: CreateRecordDto,
-    @Query('org') orgMspId: 'Org1MSP' | 'Org2MSP',
-    @Request() req: any,
+  @Query('org') orgMspId: string,
+  @Request() req: any,
   ) {
-    if (!orgMspId) {
+  const org = normalizeOrgMspId(orgMspId);
+    if (!org) {
       throw new BadRequestException('Organization MSP ID (?org=...) is required.');
     }
 
@@ -61,7 +63,7 @@ export class RecordsController {
       return await this.recordsService.create(
         file,
         createRecordDto,
-        orgMspId,
+        org as 'Org1MSP' | 'Org2MSP',
         userRole,
         userOrg
       );
@@ -75,21 +77,22 @@ export class RecordsController {
 
   /**
    * GET /records?org=Org1MSP
-   * Lists all accessible records based on policy rules
+   * Lists all accessible records based on policy
    */
   @Get()
   async findAll(
-    @Query('org') orgMspId: 'Org1MSP' | 'Org2MSP',
-    @Request() req: any,
+  @Query('org') orgMspId: string,
+  @Request() req: any,
   ) {
-    if (!orgMspId) {
+  const org = normalizeOrgMspId(orgMspId);
+    if (!org) {
       throw new BadRequestException('Organization MSP ID (?org=...) is required.');
     }
 
     try {
       const { role: userRole, organization: userOrg } = req.user;
       const records = await this.recordsService.findAll(
-        orgMspId,
+        org as 'Org1MSP' | 'Org2MSP',
         userRole,
         userOrg
       );
@@ -106,11 +109,12 @@ export class RecordsController {
   @Get(':id')
   async findOne(
     @Param('id') id: string,
-    @Query('org') orgMspId: 'Org1MSP' | 'Org2MSP',
-    @Res({ passthrough: true }) res: Response,
-    @Request() req: any,
+  @Query('org') orgMspId: string,
+  @Res({ passthrough: true }) res: Response,
+  @Request() req: any,
   ) {
-    if (!orgMspId) {
+  const org = normalizeOrgMspId(orgMspId);
+    if (!org) {
       throw new BadRequestException('Organization MSP ID (?org=...) is required.');
     }
 
@@ -118,7 +122,7 @@ export class RecordsController {
       const { role: userRole, organization: userOrg } = req.user;
       const { decryptedFile, record } = await this.recordsService.findOne(
         id,
-        orgMspId,
+        org as 'Org1MSP' | 'Org2MSP',
         userRole,
         userOrg
       );
@@ -154,14 +158,15 @@ export class RecordsController {
   @Get('case/:caseId')
   async getRecordsByCase(
     @Param('caseId') caseId: string,
-    @Query('org') orgMspId: 'Org1MSP' | 'Org2MSP',
+    @Query('org') orgMspId: string,
   ) {
-    if (!orgMspId) {
+  const org = normalizeOrgMspId(orgMspId);
+    if (!org) {
       throw new ForbiddenException('Organization MSP ID is required in query parameter (?org=Org1MSP)');
     }
 
     try {
-      return await this.recordsService.getRecordsByCase(caseId, orgMspId);
+  return await this.recordsService.getRecordsByCase(caseId, org as 'Org1MSP' | 'Org2MSP');
     } catch (error) {
       if (error.message.includes('access denied')) {
         throw new ForbiddenException(error.message);
@@ -179,8 +184,9 @@ export class RecordsController {
   async updateRecordMetadata(
     @Param('id') id: string,
     @Body() metadata: UpdateMetadataDto,
-    @Query('org') orgMspId: 'Org1MSP' | 'Org2MSP',
+    @Query('org') orgMspId: string,
   ) {
-    return this.recordsService.updateMetadata(id, metadata, orgMspId);
+    const org = normalizeOrgMspId(orgMspId);
+    return this.recordsService.updateMetadata(id, metadata, org as 'Org1MSP' | 'Org2MSP');
   }
 }

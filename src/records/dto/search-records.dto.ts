@@ -1,4 +1,6 @@
 import { IsOptional, IsString, IsEnum } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { normalizeRecordType, normalizeOrgMspId } from '../../utils/normalizers';
 
 export class SearchRecordsDto {
   @IsOptional()
@@ -6,6 +8,8 @@ export class SearchRecordsDto {
   caseId?: string;
 
   @IsOptional()
+  @IsOptional()
+  @Transform(({ value }) => normalizeRecordType(value))
   @IsString()
   recordType?: string;
 
@@ -22,5 +26,6 @@ export class SearchRecordsDto {
   dateTo?: string;
 
   @IsEnum(['Org1MSP', 'Org2MSP'])
+  @Transform(({ value }) => normalizeOrgMspId(value))
   orgMspId: 'Org1MSP' | 'Org2MSP';
 }

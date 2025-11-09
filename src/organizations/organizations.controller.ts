@@ -9,6 +9,7 @@ import {
   UnauthorizedException
 } from '@nestjs/common';
 import { OrganizationsService } from './organizations.service';
+import { normalizeOrgMspId } from '../utils/normalizers';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 type OrgMspId = 'Org1MSP' | 'Org2MSP';
@@ -27,7 +28,8 @@ export class OrganizationsController {
     @Query('org') orgMspId: OrgMspId,
     @Request() req: any,
   ) {
-    if (!orgMspId) {
+    const org = normalizeOrgMspId(orgMspId);
+    if (!org) {
       throw new BadRequestException('Organization MSP ID (?org=...) is required.');
     }
 
@@ -35,7 +37,7 @@ export class OrganizationsController {
     const { role, organization: userOrg } = req.user;
 
     return this.organizationsService.getOrganizations(
-      orgMspId,
+      org as 'Org1MSP' | 'Org2MSP',
       role
     );
   }
@@ -53,7 +55,8 @@ export class OrganizationsController {
     @Query('org') orgMspId: OrgMspId,
     @Request() req: any,
   ) {
-    if (!orgMspId) {
+    const org = normalizeOrgMspId(orgMspId);
+    if (!org) {
       throw new BadRequestException('Organization MSP ID (?org=...) is required.');
     }
 
@@ -63,7 +66,7 @@ export class OrganizationsController {
     // Verify access rights
     const hasAccess = await this.organizationsService.validateOrgAccess(
       orgId,
-      orgMspId,
+      org as 'Org1MSP' | 'Org2MSP',
       role,
       userOrg
     );
@@ -76,7 +79,7 @@ export class OrganizationsController {
 
     return this.organizationsService.getOrgMembers(
       orgId,
-      orgMspId,
+      org as 'Org1MSP' | 'Org2MSP',
       role,
       userOrg
     );

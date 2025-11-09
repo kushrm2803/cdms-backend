@@ -10,7 +10,7 @@ export class PoliciesService {
   constructor(private readonly fabricService: FabricService) {}
 
   /**
-   * Creates a new policy with role-based access rules
+   * Creates a new policy with role-based access control (allowed orgs and roles)
    */
   async createPolicy(
     createPolicyDto: CreatePolicyDto,
@@ -19,24 +19,23 @@ export class PoliciesService {
     this.logger.log(
       `Creating policy ${createPolicyDto.policyId} as ${orgMspId}`,
     );
-
-    // Validate rules first
-    this.validatePolicyRules(createPolicyDto.rules);
-
-    // Normalize rules before sending to Fabric
-    //    Ensures each rule always has both 'allow' and 'deny' keys (required by chaincode)
-    const normalizedRules = createPolicyDto.rules.map(rule => ({
-      allow: rule.allow || {},
-      deny: rule.deny || {},
-    }));
+    // Validate allowed arrays
+    if (!Array.isArray(createPolicyDto.allowedOrgs) || createPolicyDto.allowedOrgs.length === 0) {
+      throw new Error('Policy must define at least one allowedOrg');
+    }
+    if (!Array.isArray(createPolicyDto.allowedRoles) || createPolicyDto.allowedRoles.length === 0) {
+      throw new Error('Policy must define at least one allowedRole');
+    }
 
     const categoriesJSON = JSON.stringify(createPolicyDto.categories);
-    const rulesJSON = JSON.stringify(normalizedRules);
+    const allowedOrgsJSON = JSON.stringify(createPolicyDto.allowedOrgs);
+    const allowedRolesJSON = JSON.stringify(createPolicyDto.allowedRoles);
 
     await this.fabricService.createPolicy(
       createPolicyDto.policyId,
       categoriesJSON,
-      rulesJSON,
+      allowedOrgsJSON,
+      allowedRolesJSON,
       orgMspId,
     );
 
@@ -44,7 +43,8 @@ export class PoliciesService {
       message: 'Policy created successfully',
       policyId: createPolicyDto.policyId,
       categories: createPolicyDto.categories,
-      rules: normalizedRules, // return normalized rules too
+      allowedOrgs: createPolicyDto.allowedOrgs,
+      allowedRoles: createPolicyDto.allowedRoles,
     };
   }
 
@@ -102,89 +102,5 @@ export class PoliciesService {
       throw new Error(`Failed to retrieve policy ${id}: ${error.message}`);
     }
   }
-
-  /**
-   * Validates policy rules structure and logic
-   */
-  private validatePolicyRules(rules: any[]) {
-    if (!Array.isArray(rules) || rules.length === 0) {
-      throw new Error('Policy must have at least one rule');
-    }
-
-    for (const rule of rules) {
-      // At least one of allow/deny must be present
-      if (!rule.allow && !rule.deny) {
-        throw new Error('Each rule must have either allow or deny conditions');
-      }
-
-      // Validate allow rules
-      if (rule.allow) {
-        this.validateRuleConditions(rule.allow, 'allow');
-      }
-
-      // Validate deny rules
-      if (rule.deny) {
-        this.validateRuleConditions(rule.deny, 'deny');
-      }
-
-      // Check for conflicting rules
-      if (rule.allow && rule.deny) {
-        this.checkConflictingRules(rule.allow, rule.deny);
-      }
-    }
-  }
-
-  /**
-   * Validates individual rule conditions
-   */
-  private validateRuleConditions(condition: any, type: 'allow' | 'deny') {
-    // Organization check
-    if (condition.org && typeof condition.org !== 'string') {
-      throw new Error(`${type} org must be a string`);
-    }
-
-    // Role check
-    if (condition.role) {
-      // Auto-wrap single role string into an array for user convenience
-      if (typeof condition.role === 'string') {
-        condition.role = [condition.role];
-      } else if (!Array.isArray(condition.role) ||
-        !condition.role.every(r => typeof r === 'string')) {
-        throw new Error(`${type} roles must be an array of strings`);
-      }
-    }
-
-    // User check
-    if (condition.user) {
-      if (typeof condition.user === 'string') {
-        condition.user = [condition.user];
-      } else if (!Array.isArray(condition.user) ||
-        !condition.user.every(u => typeof u === 'string')) {
-        throw new Error(`${type} users must be an array of strings`);
-      }
-    }
-  }
-
-  /**
-   * Checks for conflicting allow/deny rules
-   */
-  private checkConflictingRules(allow: any, deny: any) {
-    if (allow.org && deny.org && allow.org === deny.org) {
-      throw new Error('Cannot allow and deny the same organization');
-    }
-
-    if (allow.role && deny.role) {
-      const conflicts = allow.role.filter(r => deny.role.includes(r));
-      if (conflicts.length > 0) {
-        throw new Error(`Cannot allow and deny the same roles: ${conflicts.join(', ')}`);
-      }
-    }
-
-    if (allow.user && deny.user) {
-      const conflicts = allow.user.filter(u => deny.user.includes(u));
-      if (conflicts.length > 0) {
-        throw new Error(`Cannot allow and deny the same users: ${conflicts.join(', ')}`);
-      }
-    }
-  }
+  // (old rule validation removed - using simplified allowed arrays)
 }

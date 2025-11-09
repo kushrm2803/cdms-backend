@@ -114,26 +114,14 @@ export class RecordsService {
       const policyJson = await this.fabricService.queryPolicy(record.policyId, record.ownerOrg);
       const policy = JSON.parse(policyJson);
 
-      let hasAccess = false;
-      for (const rule of policy.rules) {
-        // Check allow rules
-        if (rule.allow) {
-          if (rule.allow.org === userOrg || rule.allow.role?.includes(userRole)) {
-            hasAccess = true;
-          }
-        }
+      const allowedOrgs: string[] = policy.allowedOrgs || policy.AllowedOrgs || [];
+      const allowedRoles: string[] = policy.allowedRoles || policy.AllowedRoles || [];
 
-        // Check deny rules (these override allow rules)
-        if (rule.deny) {
-          if (rule.deny.org === userOrg || rule.deny.role?.includes(userRole)) {
-            hasAccess = false;
-            break;
-          }
-        }
-      }
+      const orgAllowed = allowedOrgs.some((o: string) => o === userOrg || o === '*');
+      const roleAllowed = allowedRoles.some((r: string) => r === userRole || r === '*');
 
-      if (!hasAccess) {
-        throw new Error('Access denied by policy rules');
+      if (!(orgAllowed && roleAllowed)) {
+        throw new Error('Access denied by policy');
       }
     } catch (error) {
       throw new Error(`Policy validation failed: ${error.message}`);
@@ -248,14 +236,16 @@ export class RecordsService {
 
     try {
       const categoriesJSON = JSON.stringify(policyData.categories);
-      const rulesJSON = JSON.stringify(policyData.rules);
+      const allowedOrgsJSON = JSON.stringify(policyData.allowedOrgs || policyData.AllowedOrgs || []);
+      const allowedRolesJSON = JSON.stringify(policyData.allowedRoles || policyData.AllowedRoles || []);
       const policyId = policyData.policyId;
 
       this.logger.log(`Submitting policy ${policyId} to Fabric...`);
       await this.fabricService.createPolicy(
         policyId,
         categoriesJSON,
-        rulesJSON,
+        allowedOrgsJSON,
+        allowedRolesJSON,
         orgMspId,
       );
       this.logger.log('Fabric transaction successful.');

@@ -21,6 +21,7 @@ interface RequestWithUser extends Request {
   };
 }
 import { PoliciesService } from './policies.service';
+import { normalizeOrgMspId } from '../utils/normalizers';
 import { CreatePolicyDto } from './dto/create-policy';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -33,7 +34,7 @@ export class PoliciesController {
 
   /**
    * POST /policies?org=Org1MSP
-   * Creates a new policy with role-based access rules.
+   * Creates a new policy with role-based access control (allowed orgs and roles).
    * Requires admin role to create policies.
    */
   @Post()
@@ -43,7 +44,8 @@ export class PoliciesController {
     @Req() req: RequestWithUser, // To access user claims from JWT
   ) {
     // Allow org to be supplied either via query param or JWT claim
-    const callerOrg = orgMspId || req.user?.organization;
+    const callerOrgRaw = orgMspId || req.user?.organization;
+    const callerOrg = normalizeOrgMspId(callerOrgRaw);
     if (!callerOrg) {
       throw new BadRequestException('Organization MSP ID (?org=...) is required.');
     }
@@ -53,13 +55,16 @@ export class PoliciesController {
       throw new UnauthorizedException('Only administrators can create policies.');
     }
 
-    // Validate policy rules
-    if (!createPolicyDto.rules || createPolicyDto.rules.length === 0) {
-      throw new BadRequestException('Policy must have at least one access rule.');
+    // Validate allowed arrays
+    if (!createPolicyDto.allowedOrgs || createPolicyDto.allowedOrgs.length === 0) {
+      throw new BadRequestException('Policy must have at least one allowedOrg.');
+    }
+    if (!createPolicyDto.allowedRoles || createPolicyDto.allowedRoles.length === 0) {
+      throw new BadRequestException('Policy must have at least one allowedRole.');
     }
 
     try {
-      return await this.policiesService.createPolicy(createPolicyDto, callerOrg as OrgMspId);
+    return await this.policiesService.createPolicy(createPolicyDto, callerOrg as OrgMspId);
     } catch (error) {
       if (error.message?.includes('already exists')) {
         throw new BadRequestException(`Policy ${createPolicyDto.policyId} already exists.`);
@@ -79,7 +84,8 @@ export class PoliciesController {
     @Req() req: RequestWithUser,
   ) {
     // Allow org from query or JWT
-    const callerOrg = orgMspId || req.user?.organization;
+    const callerOrgRaw = orgMspId || req.user?.organization;
+    const callerOrg = normalizeOrgMspId(callerOrgRaw);
     if (!callerOrg) {
       throw new BadRequestException('Organization MSP ID (?org=...) is required.');
     }
@@ -92,18 +98,14 @@ export class PoliciesController {
 
     // Filter policies based on user's role and organization (defensive checks)
     return policies.filter(policy => {
-      if (!policy || !Array.isArray(policy.rules)) return false;
-      return policy.rules.some(rule => {
-        const allow = rule.allow || {};
-        const deny = rule.deny || {};
+      if (!policy) return false;
+      const allowedOrgs = policy.allowedOrgs || policy.AllowedOrgs || [];
+      const allowedRoles = policy.allowedRoles || policy.AllowedRoles || [];
 
-        const allowOrgOk = !allow.org || allow.org === req.user!.organization;
-        const allowRoleOk = !allow.role || (Array.isArray(allow.role) && allow.role.includes(req.user!.role));
-        const denyOrgBad = deny.org && deny.org === req.user!.organization;
-        const denyRoleBad = deny.role && Array.isArray(deny.role) && deny.role.includes(req.user!.role);
+      const orgOk = allowedOrgs.length === 0 || allowedOrgs.includes(req.user!.organization);
+      const roleOk = allowedRoles.length === 0 || (Array.isArray(allowedRoles) && allowedRoles.includes(req.user!.role));
 
-        return allowOrgOk && allowRoleOk && !denyOrgBad && !denyRoleBad;
-      });
+      return orgOk && roleOk;
     });
   }
 
@@ -118,7 +120,8 @@ export class PoliciesController {
     @Req() req: RequestWithUser,
   ) {
     // Allow org from query or JWT
-    const callerOrg = orgMspId || req.user?.organization;
+    const callerOrgRaw = orgMspId || req.user?.organization;
+    const callerOrg = normalizeOrgMspId(callerOrgRaw);
     if (!callerOrg) {
       throw new BadRequestException('Organization MSP ID (?org=...) is required.');
     }
@@ -130,22 +133,19 @@ export class PoliciesController {
         throw new UnauthorizedException('User is not authenticated');
       }
 
+
       // Defensive access checks
-      if (!policy || !Array.isArray(policy.rules)) {
+      if (!policy) {
         throw new NotFoundException(`Policy ${id} not found.`);
       }
 
-      const hasAccess = policy.rules.some(rule => {
-        const allow = rule.allow || {};
-        const deny = rule.deny || {};
+      const allowedOrgs = policy.allowedOrgs || policy.AllowedOrgs || [];
+      const allowedRoles = policy.allowedRoles || policy.AllowedRoles || [];
 
-        const allowOrgOk = !allow.org || allow.org === req.user!.organization;
-        const allowRoleOk = !allow.role || (Array.isArray(allow.role) && allow.role.includes(req.user!.role));
-        const denyOrgBad = deny.org && deny.org === req.user!.organization;
-        const denyRoleBad = deny.role && Array.isArray(deny.role) && deny.role.includes(req.user!.role);
+      const orgOk = allowedOrgs.length === 0 || allowedOrgs.includes(req.user!.organization);
+      const roleOk = allowedRoles.length === 0 || (Array.isArray(allowedRoles) && allowedRoles.includes(req.user!.role));
 
-        return allowOrgOk && allowRoleOk && !denyOrgBad && !denyRoleBad;
-      });
+      const hasAccess = orgOk && roleOk;
 
       if (!hasAccess) {
         throw new UnauthorizedException('You do not have access to this policy.');

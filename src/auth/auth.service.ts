@@ -24,7 +24,8 @@ export class AuthService {
   }
 
   async login(user: any) {
-    const payload = { username: user.username, sub: user.username, role: user.role, org: user.organization || user.organizationId };
+    // Include 'organization' claim (canonical) so downstream code can read req.user.organization
+    const payload = { username: user.username, sub: user.username, role: user.role, organization: user.organization || user.organizationId };
     return { accessToken: this.jwtService.sign(payload) };
   }
 }

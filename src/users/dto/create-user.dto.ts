@@ -1,4 +1,6 @@
 import { IsString, IsEmail, IsEnum } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { normalizeRole, normalizeOrgMspId } from '../../utils/normalizers';
 
 export class CreateUserDto {
   @IsString()
@@ -13,9 +15,11 @@ export class CreateUserDto {
   @IsString()
   fullName: string;
 
-  @IsEnum(['Investigator', 'Admin', 'Forensics', 'Judge'])
+  @Transform(({ value }) => normalizeRole(value))
+  @IsEnum(['investigator', 'admin', 'forensics', 'judge'])
   role: string;
 
+  @Transform(({ value }) => normalizeOrgMspId(value))
   @IsString()
   organizationId: string;
 }

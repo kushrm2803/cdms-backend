@@ -1,4 +1,6 @@
 import { IsString, IsOptional, IsEnum } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { normalizeStatus } from '../../utils/normalizers';
 
 export class CreateCaseDto {
   @IsString()
@@ -7,6 +9,7 @@ export class CreateCaseDto {
   @IsString()
   description: string;
 
+  @Transform(({ value }) => normalizeStatus(value))
   @IsEnum(['Open', 'Closed', 'Under Investigation'])
   status: string;
 

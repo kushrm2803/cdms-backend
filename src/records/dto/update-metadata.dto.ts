@@ -1,4 +1,6 @@
 import { IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { normalizeRecordType } from '../../utils/normalizers';
 
 export class UpdateMetadataDto {
   @IsOptional()
@@ -6,6 +8,8 @@ export class UpdateMetadataDto {
   description?: string;
 
   @IsOptional()
+  @IsOptional()
+  @Transform(({ value }) => normalizeRecordType(value))
   @IsString()
   recordType?: string;
 

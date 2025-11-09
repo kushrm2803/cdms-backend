@@ -35,7 +35,10 @@ export class CreatePolicyDto {
   categories: string[];
 
   @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => RuleDto)
-  rules: RuleDto[];
+  @IsString({ each: true })
+  allowedOrgs: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  allowedRoles: string[];
 }

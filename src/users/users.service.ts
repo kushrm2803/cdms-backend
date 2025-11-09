@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { FabricService } from '../records/fabric.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import * as bcrypt from 'bcrypt';
+import { normalizeOrgMspId } from '../utils/normalizers';
 
 @Injectable()
 export class UsersService {
@@ -13,8 +14,9 @@ export class UsersService {
     // For now, we call chaincode to persist user data; password handling must be added (hashing, vault)
     // Hash password before sending to chaincode
     const passwordHash = await bcrypt.hash(createUserDto.password, 10);
-    // Use provided organizationId or default to Org1MSP
-    const org = createUserDto.organizationId || 'Org1MSP';
+    // Use provided organizationId or default to Org1MSP, normalize value to canonical MSP ID
+    const rawOrg = createUserDto.organizationId || 'Org1MSP';
+    const org = normalizeOrgMspId(rawOrg) || 'Org1MSP';
     if (!createUserDto.organizationId) {
       this.logger.warn(`No organizationId provided for user ${createUserDto.username}; defaulting to ${org}`);
     }
@@ -26,7 +28,7 @@ export class UsersService {
       createUserDto.role,
       org,
       passwordHash,
-      'Org1MSP',
+      org as 'Org1MSP' | 'Org2MSP',
     );
     return { message: 'User registration submitted to blockchain' };
   }

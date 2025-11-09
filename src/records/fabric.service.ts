@@ -182,7 +182,8 @@ export class FabricService {
   async createPolicy(
     policyId: string,
     categoriesJSON: string,
-    rulesJSON: string,
+    allowedOrgsJSON: string,
+    allowedRolesJSON: string,
     orgMspId: OrgMspId,
   ): Promise<void> {
     this.logger.log(`Submitting 'CreatePolicy' as ${orgMspId} for ID: ${policyId}`);
@@ -190,7 +191,7 @@ export class FabricService {
     try {
       const network = gateway.getNetwork(this.channelName);
       const contract = network.getContract(this.chaincodeName);
-      const txArgs = this.prepareArgs([policyId, categoriesJSON, rulesJSON]);
+      const txArgs = this.prepareArgs([policyId, categoriesJSON, allowedOrgsJSON, allowedRolesJSON]);
       await contract.submitTransaction('CreatePolicy', ...txArgs);
       this.logger.log(`Transaction 'CreatePolicy' committed successfully by ${orgMspId}.`);
     } catch (error) {
