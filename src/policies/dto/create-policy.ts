@@ -10,10 +10,18 @@ import {
 // This defines the 'Rule' object
 class RuleDto {
   @IsObject()
-  allow?: Record<string, string>;
+  allow?: {
+    org?: string;
+    role?: string[];
+    user?: string[];
+  };
 
   @IsObject()
-  deny?: Record<string, string>;
+  deny?: {
+    org?: string;
+    role?: string[];
+    user?: string[];
+  };
 }
 
 // This defines the main request body

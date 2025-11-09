@@ -27,8 +27,8 @@ type Record struct {
 }
 
 type Rule struct {
-    Allow map[string]string `json:"allow,omitempty"`
-    Deny  map[string]string `json:"deny,omitempty"`
+    Allow map[string]interface{} `json:"allow,omitempty"`
+    Deny  map[string]interface{} `json:"deny,omitempty"`
 }
 
 type Policy struct {
@@ -133,10 +133,10 @@ func (s *SmartContract) QueryPolicy(ctx contractapi.TransactionContextInterface,
     // Initialize nil maps to empty maps before returning
     for i := range policy.Rules {
         if policy.Rules[i].Allow == nil {
-            policy.Rules[i].Allow = make(map[string]string)
+            policy.Rules[i].Allow = make(map[string]interface{})
         }
         if policy.Rules[i].Deny == nil {
-            policy.Rules[i].Deny = make(map[string]string)
+            policy.Rules[i].Deny = make(map[string]interface{})
         }
     }
     // --- END FIX ---
@@ -171,10 +171,10 @@ func (s *SmartContract) QueryAllPolicies(ctx contractapi.TransactionContextInter
         // --- FIX for chaincode API validator ---
         for i := range p.Rules {
             if p.Rules[i].Allow == nil {
-                p.Rules[i].Allow = make(map[string]string)
+                p.Rules[i].Allow = make(map[string]interface{})
             }
             if p.Rules[i].Deny == nil {
-                p.Rules[i].Deny = make(map[string]string)
+                p.Rules[i].Deny = make(map[string]interface{})
             }
         }
         
@@ -423,7 +423,7 @@ func (s *SmartContract) CreateRecord(ctx contractapi.TransactionContextInterface
     return ctx.GetStub().PutState(key, recJSON)
 }
 
-func (s *SmartContract) QueryRecord(ctx contractapi.TransactionContextInterface, id string) (*Record, error) {
+func (s *SmartContract) QueryRecord(ctx contractapi.TransactionContextInterface, id string, userRole string) (*Record, error) {
     key := "record:" + id
     recJSON, err := ctx.GetStub().GetState(key)
     if err != nil {
@@ -436,6 +436,49 @@ func (s *SmartContract) QueryRecord(ctx contractapi.TransactionContextInterface,
     if err := json.Unmarshal(recJSON, &rec); err != nil {
         return nil, err
     }
+
+    // Get client org and role for policy check
+    clientMSPID, err := ctx.GetClientIdentity().GetMSPID()
+    if err != nil {
+        return nil, fmt.Errorf("failed to get client MSP ID: %v", err)
+    }
+
+    // Get the policy
+    if rec.PolicyID == "" {
+        return nil, fmt.Errorf("record %s has no associated policy", id)
+    }
+
+    policy, err := s.QueryPolicy(ctx, rec.PolicyID)
+    if err != nil {
+        return nil, fmt.Errorf("failed to get policy %s: %v", rec.PolicyID, err)
+    }
+
+    // Check if org has access according to policy
+    hasAccess := false
+    for _, rule := range policy.Rules {
+        // Check deny rules first - they override allow rules
+        if rule.Deny != nil {
+            if org, exists := rule.Deny["org"]; exists {
+                if org == clientMSPID || org == "*" {
+                    return nil, fmt.Errorf("access denied by policy for organization %s", clientMSPID)
+                }
+            }
+        }
+        // Check allow rules
+        if rule.Allow != nil {
+            if org, exists := rule.Allow["org"]; exists {
+                if org == clientMSPID || org == "*" {
+                    hasAccess = true
+                    break
+                }
+            }
+        }
+    }
+
+    if !hasAccess {
+        return nil, fmt.Errorf("organization %s not allowed by policy to access record %s", clientMSPID, id)
+    }
+
     return &rec, nil
 }
 
@@ -452,6 +495,11 @@ func (s *SmartContract) QueryRecordsByCase(ctx contractapi.TransactionContextInt
     }
     defer resultsIterator.Close()
 
+    clientMSPID, err := ctx.GetClientIdentity().GetMSPID()
+    if err != nil {
+        return nil, fmt.Errorf("failed to get client MSP ID: %v", err)
+    }
+
     var records []*Record
     for resultsIterator.HasNext() {
         qr, err := resultsIterator.Next()
@@ -465,7 +513,43 @@ func (s *SmartContract) QueryRecordsByCase(ctx contractapi.TransactionContextInt
 
         // Manual in-memory filtering
         if r.DocType == "record" && r.CaseID == caseId {
-            records = append(records, &r)
+            // Check policy for each record
+            if r.PolicyID == "" {
+                continue // Skip records without policy
+            }
+
+            policy, err := s.QueryPolicy(ctx, r.PolicyID)
+            if err != nil {
+                continue // Skip if policy can't be retrieved
+            }
+
+            // Check if org has access according to policy
+            hasAccess := false
+            denied := false
+            for _, rule := range policy.Rules {
+                // Check deny rules first
+                if rule.Deny != nil {
+                    if org, exists := rule.Deny["org"]; exists {
+                        if org == clientMSPID || org == "*" {
+                            denied = true
+                            break
+                        }
+                    }
+                }
+                // Check allow rules
+                if rule.Allow != nil {
+                    if org, exists := rule.Allow["org"]; exists {
+                        if org == clientMSPID || org == "*" {
+                            hasAccess = true
+                            break
+                        }
+                    }
+                }
+            }
+
+            if !denied && hasAccess {
+                records = append(records, &r)
+            }
         }
     }
     return records, nil
@@ -489,6 +573,11 @@ func (s *SmartContract) QueryRecords(ctx contractapi.TransactionContextInterface
     }
     defer resultsIterator.Close()
 
+    clientMSPID, err := ctx.GetClientIdentity().GetMSPID()
+    if err != nil {
+        return nil, fmt.Errorf("failed to get client MSP ID: %v", err)
+    }
+
     var records []*Record
     for resultsIterator.HasNext() {
         qr, err := resultsIterator.Next()
@@ -501,7 +590,43 @@ func (s *SmartContract) QueryRecords(ctx contractapi.TransactionContextInterface
         }
         
         if r.DocType == "record" {
-             records = append(records, &r)
+            // Check policy for each record
+            if r.PolicyID == "" {
+                continue // Skip records without policy
+            }
+
+            policy, err := s.QueryPolicy(ctx, r.PolicyID)
+            if err != nil {
+                continue // Skip if policy can't be retrieved
+            }
+
+            // Check if org has access according to policy
+            hasAccess := false
+            denied := false
+            for _, rule := range policy.Rules {
+                // Check deny rules first
+                if rule.Deny != nil {
+                    if org, exists := rule.Deny["org"]; exists {
+                        if org == clientMSPID || org == "*" {
+                            denied = true
+                            break
+                        }
+                    }
+                }
+                // Check allow rules
+                if rule.Allow != nil {
+                    if org, exists := rule.Allow["org"]; exists {
+                        if org == clientMSPID || org == "*" {
+                            hasAccess = true
+                            break
+                        }
+                    }
+                }
+            }
+
+            if !denied && hasAccess {
+                records = append(records, &r)
+            }
         }
     }
     return records, nil

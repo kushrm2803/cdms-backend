@@ -68,4 +68,21 @@ export class MinioService {
     // The result.Body is a Buffer
     return result.Body as Buffer;
   }
+
+  /**
+   * Deletes a file from the MinIO bucket
+   * @param fileKey The unique key of the file to delete
+   */
+  async delete(fileKey: string): Promise<void> {
+    this.logger.log(`Deleting file '${fileKey}' from bucket '${this.bucketName}'...`);
+
+    await this.s3
+      .deleteObject({
+        Bucket: this.bucketName,
+        Key: fileKey,
+      })
+      .promise();
+
+    this.logger.log(`File '${fileKey}' deleted successfully.`);
+  }
 }

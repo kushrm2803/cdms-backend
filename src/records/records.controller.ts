@@ -13,8 +13,13 @@ import {
   StreamableFile,
   ForbiddenException,
   Query,
-  Put
+  Put,
+  UseGuards,
+  BadRequestException,
+  NotFoundException,
+  Request
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Express } from 'express';
 import { RecordsService } from './records.service';
@@ -25,62 +30,116 @@ import { UpdateMetadataDto } from './dto/update-metadata.dto';
 import type { Response } from 'express';
 
 @Controller('records')
+@UseGuards(JwtAuthGuard)
 export class RecordsController {
   private readonly logger = new Logger(RecordsController.name);
 
   constructor(private readonly recordsService: RecordsService) {}
 
+  /**
+   * POST /records?org=Org1MSP
+   * Creates a new record with policy-based access control
+   */
   @Post()
   @UseInterceptors(FileInterceptor('file'))
-  create(
+  async create(
     @UploadedFile() file: Express.Multer.File,
     @Body() createRecordDto: CreateRecordDto,
+    @Query('org') orgMspId: 'Org1MSP' | 'Org2MSP',
+    @Request() req: any,
   ) {
-    return this.recordsService.create(file, createRecordDto);
+    if (!orgMspId) {
+      throw new BadRequestException('Organization MSP ID (?org=...) is required.');
+    }
+
+    if (!file) {
+      throw new BadRequestException('File is required.');
+    }
+
+    try {
+      const { role: userRole, organization: userOrg } = req.user;
+      return await this.recordsService.create(
+        file,
+        createRecordDto,
+        orgMspId,
+        userRole,
+        userOrg
+      );
+    } catch (error) {
+      if (error.message.includes('Access denied')) {
+        throw new ForbiddenException(error.message);
+      }
+      throw new BadRequestException(`Failed to create record: ${error.message}`);
+    }
   }
 
-  @Post('policies')
-  createPolicy(@Body() policyData: any) {
-    this.logger.log('Received request to create policy:', policyData);
-    return this.recordsService.createPolicy(policyData);
-  }
-
+  /**
+   * GET /records?org=Org1MSP
+   * Lists all accessible records based on policy rules
+   */
   @Get()
-  findAll() {
-    return this.recordsService.findAll();
+  async findAll(
+    @Query('org') orgMspId: 'Org1MSP' | 'Org2MSP',
+    @Request() req: any,
+  ) {
+    if (!orgMspId) {
+      throw new BadRequestException('Organization MSP ID (?org=...) is required.');
+    }
+
+    try {
+      const { role: userRole, organization: userOrg } = req.user;
+      const records = await this.recordsService.findAll(
+        orgMspId,
+        userRole,
+        userOrg
+      );
+      return records;
+    } catch (error) {
+      throw new BadRequestException(`Failed to retrieve records: ${error.message}`);
+    }
   }
 
-  // --- THIS IS THE NEW DOWNLOAD ENDPOINT ---
+  /**
+   * GET /records/:id?org=Org1MSP
+   * Downloads a record if the user has access based on policy
+   */
   @Get(':id')
   async findOne(
     @Param('id') id: string,
-    @Query('org') orgMspId: 'Org1MSP' | 'Org2MSP', // <-- ADDED THIS
+    @Query('org') orgMspId: 'Org1MSP' | 'Org2MSP',
     @Res({ passthrough: true }) res: Response,
+    @Request() req: any,
   ) {
+    if (!orgMspId) {
+      throw new BadRequestException('Organization MSP ID (?org=...) is required.');
+    }
+
     try {
-      // We now pass the orgMspId from the URL to the service
+      const { role: userRole, organization: userOrg } = req.user;
       const { decryptedFile, record } = await this.recordsService.findOne(
         id,
-        orgMspId, // <-- PASS IT HERE
+        orgMspId,
+        userRole,
+        userOrg
       );
 
-      // We need to tell the browser what kind of file this is
-      // For now, we'll just set a generic "download" type
+      // Set file download headers
       res.set({
         'Content-Type': 'application/octet-stream',
         'Content-Disposition': `attachment; filename="decrypted_${record.id}"`,
       });
 
-      // Return the file stream
       return new StreamableFile(decryptedFile);
     } catch (error) {
-      if (error.message.includes('access denied')) {
+      if (error.message.includes('Access denied') || error.message.includes('Policy')) {
         throw new ForbiddenException(error.message);
       }
-      throw error;
+      if (error.message.includes('not found')) {
+        throw new NotFoundException(error.message);
+      }
+      throw new BadRequestException(`Failed to retrieve record: ${error.message}`);
     }
   }
-  // --- END OF NEW ENDPOINT ---
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateRecordDto: UpdateRecordDto) {
@@ -97,7 +156,18 @@ export class RecordsController {
     @Param('caseId') caseId: string,
     @Query('org') orgMspId: 'Org1MSP' | 'Org2MSP',
   ) {
-    return this.recordsService.getRecordsByCase(caseId, orgMspId);
+    if (!orgMspId) {
+      throw new ForbiddenException('Organization MSP ID is required in query parameter (?org=Org1MSP)');
+    }
+
+    try {
+      return await this.recordsService.getRecordsByCase(caseId, orgMspId);
+    } catch (error) {
+      if (error.message.includes('access denied')) {
+        throw new ForbiddenException(error.message);
+      }
+      throw error;
+    }
   }
 
   @Get('search')
