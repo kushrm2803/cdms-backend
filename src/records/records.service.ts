@@ -64,7 +64,7 @@ export class RecordsService {
   ): Promise<void> {
     try {
       // Query case details from chaincode
-      const caseResult = await this.fabricService.queryCase(caseId, orgMspId);
+      const caseResult = await this.fabricService.queryCase(caseId, userRole, orgMspId);
       const caseData = JSON.parse(caseResult);
 
       // Admin has access to all cases

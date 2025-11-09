@@ -22,4 +22,8 @@ export class CreateCaseDto {
   @IsOptional()
   @IsString()
   additionalDetails?: string;
+
+  @IsOptional()
+  @IsString()
+  policyId?: string;  // Optional policy ID to control access
 }

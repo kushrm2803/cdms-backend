@@ -68,6 +68,7 @@ type Case struct {
     CreatedBy   string `json:"createdBy"`
     CreatedAt   string `json:"createdAt"`
     Organization string `json:"organization"`
+    PolicyID    string `json:"policyId"`     // Policy controlling access to this case
 }
 
 // --------------------------- POLICIES --------------------------------
@@ -279,7 +280,7 @@ func (s *SmartContract) QueryUser(ctx contractapi.TransactionContextInterface, u
 
 // --------------------------- CASES ---------------------------------
 
-func (s *SmartContract) CreateCase(ctx contractapi.TransactionContextInterface, id, title, description, jurisdiction, caseType string) error {
+func (s *SmartContract) CreateCase(ctx contractapi.TransactionContextInterface, id, title, description, jurisdiction, caseType, policyId string) error {
     key := "case:" + id
     exists, err := ctx.GetStub().GetState(key)
     if err != nil {
@@ -287,6 +288,30 @@ func (s *SmartContract) CreateCase(ctx contractapi.TransactionContextInterface, 
     }
     if exists != nil {
         return fmt.Errorf("case %s already exists", id)
+    }
+
+    // Verify policy exists and creator has access
+    if policyId != "" {
+        policy, err := s.QueryPolicy(ctx, policyId)
+        if err != nil {
+            return fmt.Errorf("failed to get policy %s: %v", policyId, err)
+        }
+        clientMSPID, err := ctx.GetClientIdentity().GetMSPID()
+        if err != nil {
+            return fmt.Errorf("failed to get client MSP ID: %v", err)
+        }
+        
+        // Check if org is allowed by policy
+        orgAllowed := false
+        for _, o := range policy.AllowedOrgs {
+            if o == clientMSPID || o == "*" {
+                orgAllowed = true
+                break
+            }
+        }
+        if !orgAllowed {
+            return fmt.Errorf("organization %s not allowed by policy %s", clientMSPID, policyId)
+        }
     }
 
     clientMSPID, _ := ctx.GetClientIdentity().GetMSPID()
@@ -302,6 +327,7 @@ func (s *SmartContract) CreateCase(ctx contractapi.TransactionContextInterface, 
         CreatedBy:   clientMSPID,
         CreatedAt:   "auto-generated",
         Organization: clientMSPID,
+        PolicyID:    policyId,
     }
 
     caseJSON, err := json.Marshal(caseObj)
@@ -312,7 +338,7 @@ func (s *SmartContract) CreateCase(ctx contractapi.TransactionContextInterface, 
     return ctx.GetStub().PutState(key, caseJSON)
 }
 
-func (s *SmartContract) QueryCase(ctx contractapi.TransactionContextInterface, id string) (*Case, error) {
+func (s *SmartContract) QueryCase(ctx contractapi.TransactionContextInterface, id string, userRole string) (*Case, error) {
     key := "case:" + id
     caseJSON, err := ctx.GetStub().GetState(key)
     if err != nil {
@@ -325,11 +351,48 @@ func (s *SmartContract) QueryCase(ctx contractapi.TransactionContextInterface, i
     if err := json.Unmarshal(caseJSON, &caseObj); err != nil {
         return nil, err
     }
+
+    // If case has a policy, check access
+    if caseObj.PolicyID != "" {
+        // Get client org for policy check
+        clientMSPID, err := ctx.GetClientIdentity().GetMSPID()
+        if err != nil {
+            return nil, fmt.Errorf("failed to get client MSP ID: %v", err)
+        }
+
+        policy, err := s.QueryPolicy(ctx, caseObj.PolicyID)
+        if err != nil {
+            return nil, fmt.Errorf("failed to get policy %s: %v", caseObj.PolicyID, err)
+        }
+
+        // Check access using simplified policy: require org AND role to match allowed lists
+        orgAllowed := false
+        roleAllowed := false
+
+        for _, o := range policy.AllowedOrgs {
+            if o == clientMSPID || o == "*" {
+                orgAllowed = true
+                break
+            }
+        }
+
+        for _, r := range policy.AllowedRoles {
+            if r == userRole || r == "*" {
+                roleAllowed = true
+                break
+            }
+        }
+
+        if !(orgAllowed && roleAllowed) {
+            return nil, fmt.Errorf("access denied by policy for organization %s and role %s", clientMSPID, userRole)
+        }
+    }
+
     return &caseObj, nil
 }
 
 // QueryAllCases supports optional rich query passed as filters JSON. If filters is empty, returns all cases.
-func (s *SmartContract) QueryAllCases(ctx contractapi.TransactionContextInterface, filters string) ([]*Case, error) {
+func (s *SmartContract) QueryAllCases(ctx contractapi.TransactionContextInterface, filters string, userRole string) ([]*Case, error) {
     // --- FIX for LevelDB ---
     // GetStateByRange does not support filters. We will get all cases.
     // A warning is logged if filters were provided, as they will be ignored.
@@ -346,6 +409,11 @@ func (s *SmartContract) QueryAllCases(ctx contractapi.TransactionContextInterfac
     }
     defer resultsIterator.Close()
 
+    clientMSPID, err := ctx.GetClientIdentity().GetMSPID()
+    if err != nil {
+        return nil, fmt.Errorf("failed to get client MSP ID: %v", err)
+    }
+
     var cases []*Case
     for resultsIterator.HasNext() {
         qr, err := resultsIterator.Next()
@@ -358,7 +426,40 @@ func (s *SmartContract) QueryAllCases(ctx contractapi.TransactionContextInterfac
         }
         
         if c.DocType == "case" {
-            cases = append(cases, &c)
+            // If case has no policy, include it
+            if c.PolicyID == "" {
+                cases = append(cases, &c)
+                continue
+            }
+
+            // Check policy access
+            policy, err := s.QueryPolicy(ctx, c.PolicyID)
+            if err != nil {
+                log.Printf("Warning: Could not check policy %s for case %s: %v", c.PolicyID, c.ID, err)
+                continue
+            }
+
+            // Check access using simplified policy
+            orgAllowed := false
+            roleAllowed := false
+
+            for _, o := range policy.AllowedOrgs {
+                if o == clientMSPID || o == "*" {
+                    orgAllowed = true
+                    break
+                }
+            }
+
+            for _, r := range policy.AllowedRoles {
+                if r == userRole || r == "*" {
+                    roleAllowed = true
+                    break
+                }
+            }
+
+            if orgAllowed && roleAllowed {
+                cases = append(cases, &c)
+            }
         }
     }
     return cases, nil

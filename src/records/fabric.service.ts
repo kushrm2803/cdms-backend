@@ -390,6 +390,7 @@ export class FabricService {
     description: string,
     jurisdiction: string,
     caseType: string,
+    policyId: string,
     orgMspId: OrgMspId,
   ): Promise<void> {
     this.logger.log(`Submitting 'CreateCase' as ${orgMspId} for ID: ${id}`);
@@ -397,7 +398,7 @@ export class FabricService {
     try {
       const network = gateway.getNetwork(this.channelName);
       const contract = network.getContract(this.chaincodeName);
-  const txArgs = this.prepareArgs([id, title, description, jurisdiction, caseType]);
+  const txArgs = this.prepareArgs([id, title, description, jurisdiction, caseType, policyId]);
   await contract.submitTransaction('CreateCase', ...txArgs);
       this.logger.log(`Transaction 'CreateCase' committed successfully.`);
     } catch (error) {
@@ -427,13 +428,13 @@ export class FabricService {
     }
   }
 
-  async queryAllCases(filtersJSON: string, orgMspId: OrgMspId): Promise<string> {
+  async queryAllCases(filtersJSON: string, userRole: string, orgMspId: OrgMspId): Promise<string> {
     this.logger.log(`Evaluating 'QueryAllCases' as ${orgMspId} with filters`);
     const { gateway, client } = await this.connect(orgMspId);
     try {
       const network = gateway.getNetwork(this.channelName);
       const contract = network.getContract(this.chaincodeName);
-  const evalArgs = this.prepareArgs([filtersJSON]);
+  const evalArgs = this.prepareArgs([filtersJSON, userRole]);
   const resultBytes = await contract.evaluateTransaction('QueryAllCases', ...evalArgs);
       const result = Buffer.from(resultBytes).toString('utf-8');
       this.logger.log(`Transaction 'QueryAllCases' evaluated successfully.`);
@@ -466,13 +467,13 @@ export class FabricService {
   /**
    * Queries a case from the chaincode
    */
-  async queryCase(id: string, orgMspId: OrgMspId): Promise<string> {
+  async queryCase(id: string, userRole: string, orgMspId: OrgMspId): Promise<string> {
     this.logger.log(`Evaluating 'QueryCase' as ${orgMspId} for ID: ${id}`);
     const { gateway, client } = await this.connect(orgMspId);
     try {
       const network = gateway.getNetwork(this.channelName);
       const contract = network.getContract(this.chaincodeName);
-      const evalArgs = this.prepareArgs([id]);
+      const evalArgs = this.prepareArgs([id, userRole]);
       const resultBytes = await contract.evaluateTransaction('QueryCase', ...evalArgs);
       const result = Buffer.from(resultBytes).toString('utf-8');
       this.logger.log(`Transaction 'QueryCase' evaluated successfully.`);

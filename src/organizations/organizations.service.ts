@@ -16,10 +16,21 @@ export class OrganizationsService {
     
     try {
       const result = await this.fabricService.queryAllOrganizations(requestingOrgMspId);
+      
+      if (!result || result.trim() === '') {
+        return [];  // Return empty array if no orgs found
+      }
+
       const organizations = JSON.parse(result);
 
+      // Handle both array and object with array property
+      let orgs: any[] = organizations;
       if (!Array.isArray(organizations)) {
-        throw new Error('Invalid organizations data structure');
+        if (organizations && Array.isArray(organizations.organizations)) {
+          orgs = organizations.organizations;
+        } else {
+          throw new Error('Invalid organizations data structure');
+        }
       }
 
       // Filter organizations based on user role if needed
@@ -50,8 +61,12 @@ export class OrganizationsService {
     this.logger.log(`Getting members for org ${orgId} as ${requestingOrgMspId}`);
 
     try {
-      // Validate access based on role
-      if (userRole !== 'admin' && userOrg !== orgId) {
+      // For admin roles, no additional validation needed
+      if (userRole === 'admin') {
+        // Continue to query members
+      }
+      // For non-admin roles, validate that they belong to the requested org
+      else if (userOrg !== orgId) {
         throw new Error('Access denied: You can only view members of your own organization');
       }
 
@@ -97,18 +112,27 @@ export class OrganizationsService {
     }
 
     try {
+      // Check if org exists first
       const org = await this.fabricService.queryOrganizationMembers(orgId, requestingOrgMspId);
-      const orgData = JSON.parse(org);
+      if (!org || org.trim() === '') {
+        this.logger.warn(`Organization ${orgId} not found`);
+        return false;
+      }
 
-      // Check if user belongs to the org
+      // Verify user's organization matches the requested org
       if (userOrg === orgId) {
         return true;
       }
 
-      // Add additional access rules here based on your requirements
-      
+      // For non-admin roles that don't belong to the org, deny access
+      this.logger.debug(`Access denied for role ${userRole} from org ${userOrg} to view org ${orgId}`);
       return false;
+      
     } catch (error) {
+      if (error.message?.includes('not found')) {
+        this.logger.warn(`Organization ${orgId} not found during access validation`);
+        return false;
+      }
       this.logger.error(`Failed to validate org access for ${orgId}:`, error);
       return false;
     }
