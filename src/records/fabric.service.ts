@@ -19,6 +19,7 @@ export interface RecordPayload {
   recordType: string;
   fileHash: string;
   offChainUri: string;
+  ownerOrg: string;
   createdAt: string;
   policyId: string;
 }
@@ -27,7 +28,7 @@ export interface RecordPayload {
 export class FabricService {
   private readonly logger = new Logger(FabricService.name);
   private readonly channelName = 'mychannel';
-  private readonly chaincodeName = 'cdms';
+  private readonly chaincodeName = 'cdms-chaincode';
   private readonly mspIdOrg1 = 'Org1MSP';
   private readonly mspIdOrg2 = 'Org2MSP';
   
@@ -129,6 +130,18 @@ export class FabricService {
     this.logger.log('Disconnected from Fabric gateway (v4 client).');
   }
 
+  /**
+   * Prepare chaincode args: ensure none are undefined and stringify non-strings.
+   */
+  private prepareArgs(args: any[]): string[] {
+    return args.map((a, i) => {
+      if (a === undefined || a === null) {
+        throw new Error(`Undefined/null argument at position ${i} when preparing chaincode args: ${JSON.stringify(args)}`);
+      }
+      return typeof a === 'string' ? a : JSON.stringify(a);
+    });
+  }
+
   // ... (The rest of your file is PERFECT, keep createRecord, queryRecord, and createPolicy as they are) ...
 
   /**
@@ -141,16 +154,17 @@ export class FabricService {
     try {
       const network = gateway.getNetwork(this.channelName);
       const contract = network.getContract(this.chaincodeName);
-      await contract.submitTransaction(
-        'CreateRecord',
+      const txArgs = this.prepareArgs([
         payload.id,
         payload.caseId,
         payload.recordType,
         payload.fileHash,
         payload.offChainUri,
+        payload.ownerOrg,
         payload.createdAt,
         payload.policyId,
-      );
+      ]);
+      await contract.submitTransaction('CreateRecord', ...txArgs);
       this.logger.log(`Transaction 'CreateRecord' committed successfully.`);
     } catch (error) {
       this.logger.error("Failed to submit 'CreateRecord' transaction", error);
@@ -160,27 +174,7 @@ export class FabricService {
     }
   }
 
-  /**
-   * Queries a record from the chaincode
-   */
-  async queryRecord(id: string, orgMspId: OrgMspId): Promise<string> {
-    // ... (This function is correct, no changes needed) ...
-    this.logger.log(`Evaluating 'QueryRecord' as ${orgMspId} for ID: ${id}`);
-    const { gateway, client } = await this.connect(orgMspId);
-    try {
-      const network = gateway.getNetwork(this.channelName);
-      const contract = network.getContract(this.chaincodeName);
-      const resultBytes = await contract.evaluateTransaction('QueryRecord', id);
-      const result = Buffer.from(resultBytes).toString('utf-8');
-      this.logger.log(`Transaction 'QueryRecord' evaluated successfully.`);
-      return result;
-    } catch (error) {
-      this.logger.error("Failed to evaluate 'QueryRecord' transaction", error);
-      throw error;
-    } finally {
-      this.closeConnection(gateway, client);
-    }
-  }
+
 
   /**
    * Submits the CreatePolicy transaction...
@@ -188,24 +182,304 @@ export class FabricService {
   async createPolicy(
     policyId: string,
     categoriesJSON: string,
-    rulesJSON: string,
+    allowedOrgsJSON: string,
+    allowedRolesJSON: string,
     orgMspId: OrgMspId,
   ): Promise<void> {
-    // ... (This function is correct, no changes needed) ...
     this.logger.log(`Submitting 'CreatePolicy' as ${orgMspId} for ID: ${policyId}`);
     const { gateway, client } = await this.connect(orgMspId);
     try {
       const network = gateway.getNetwork(this.channelName);
       const contract = network.getContract(this.chaincodeName);
-      await contract.submitTransaction(
-        'CreatePolicy',
-        policyId,
-        categoriesJSON,
-        rulesJSON,
-      );
+      const txArgs = this.prepareArgs([policyId, categoriesJSON, allowedOrgsJSON, allowedRolesJSON]);
+      await contract.submitTransaction('CreatePolicy', ...txArgs);
       this.logger.log(`Transaction 'CreatePolicy' committed successfully by ${orgMspId}.`);
     } catch (error) {
       this.logger.error(`Failed to submit 'CreatePolicy' as ${orgMspId}`, error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  async queryRecordsByCase(caseId: string, orgMspId: OrgMspId): Promise<string> {
+    this.logger.log(`Evaluating 'QueryRecordsByCase' as ${orgMspId} for case: ${caseId}`);
+    const { gateway, client } = await this.connect(orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+  const evalArgs = this.prepareArgs([caseId]);
+  const resultBytes = await contract.evaluateTransaction('QueryRecordsByCase', ...evalArgs);
+      const result = Buffer.from(resultBytes).toString('utf-8');
+      this.logger.log(`Transaction 'QueryRecordsByCase' evaluated successfully.`);
+      return result;
+    } catch (error) {
+      this.logger.error("Failed to evaluate 'QueryRecordsByCase' transaction", error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  async queryRecords(searchParams: any): Promise<string> {
+    this.logger.log(`Evaluating 'QueryRecords' with params:`, searchParams);
+    const { gateway, client } = await this.connect(searchParams.orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+      const evalArgs = this.prepareArgs([JSON.stringify(searchParams)]);
+      const resultBytes = await contract.evaluateTransaction('QueryRecords', ...evalArgs);
+      const result = Buffer.from(resultBytes).toString('utf-8');
+      this.logger.log(`Transaction 'QueryRecords' evaluated successfully.`);
+      return result;
+    } catch (error) {
+      this.logger.error("Failed to evaluate 'QueryRecords' transaction", error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  async updateRecordMetadata(
+    id: string,
+    metadata: any,
+    orgMspId: OrgMspId
+  ): Promise<void> {
+    this.logger.log(`Submitting 'UpdateRecordMetadata' as ${orgMspId} for ID: ${id}`);
+    const { gateway, client } = await this.connect(orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+      const txArgs = this.prepareArgs([id, JSON.stringify(metadata)]);
+      await contract.submitTransaction('UpdateRecordMetadata', ...txArgs);
+      this.logger.log(`Transaction 'UpdateRecordMetadata' committed successfully.`);
+    } catch (error) {
+      this.logger.error("Failed to submit 'UpdateRecordMetadata' transaction", error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  // --- Policy queries ---
+  async queryPolicy(policyId: string, orgMspId: OrgMspId): Promise<string> {
+    this.logger.log(`Evaluating 'QueryPolicy' as ${orgMspId} for ID: ${policyId}`);
+    const { gateway, client } = await this.connect(orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+  const evalArgs = this.prepareArgs([policyId]);
+  const resultBytes = await contract.evaluateTransaction('QueryPolicy', ...evalArgs);
+      const result = Buffer.from(resultBytes).toString('utf-8');
+      this.logger.log(`Transaction 'QueryPolicy' evaluated successfully.`);
+      return result;
+    } catch (error) {
+      this.logger.error("Failed to evaluate 'QueryPolicy' transaction", error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  async queryAllPolicies(orgMspId: OrgMspId): Promise<string> {
+    this.logger.log(`Evaluating 'QueryAllPolicies' as ${orgMspId}`);
+    const { gateway, client } = await this.connect(orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+  const resultBytes = await contract.evaluateTransaction('QueryAllPolicies');
+      const result = Buffer.from(resultBytes).toString('utf-8');
+      this.logger.log(`Transaction 'QueryAllPolicies' evaluated successfully.`);
+      return result;
+    } catch (error) {
+      this.logger.error("Failed to evaluate 'QueryAllPolicies' transaction", error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  // --- Organization queries ---
+  async queryAllOrganizations(orgMspId: OrgMspId): Promise<string> {
+    this.logger.log(`Evaluating 'QueryAllOrganizations' as ${orgMspId}`);
+    const { gateway, client } = await this.connect(orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+  const resultBytes = await contract.evaluateTransaction('QueryAllOrganizations');
+      const result = Buffer.from(resultBytes).toString('utf-8');
+      this.logger.log(`Transaction 'QueryAllOrganizations' evaluated successfully.`);
+      return result;
+    } catch (error) {
+      this.logger.error("Failed to evaluate 'QueryAllOrganizations' transaction", error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  async queryOrganizationMembers(orgId: string, orgMspId: OrgMspId): Promise<string> {
+    this.logger.log(`Evaluating 'QueryOrganizationMembers' as ${orgMspId} for org: ${orgId}`);
+    const { gateway, client } = await this.connect(orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+  const evalArgs = this.prepareArgs([orgId]);
+  const resultBytes = await contract.evaluateTransaction('QueryOrganizationMembers', ...evalArgs);
+      const result = Buffer.from(resultBytes).toString('utf-8');
+      this.logger.log(`Transaction 'QueryOrganizationMembers' evaluated successfully.`);
+      return result;
+    } catch (error) {
+      this.logger.error("Failed to evaluate 'QueryOrganizationMembers' transaction", error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  // --- User operations ---
+  async createUser(
+    username: string,
+    fullName: string,
+    email: string,
+    role: string,
+    organization: string,
+    passwordHash: string,
+    orgMspId: OrgMspId,
+  ): Promise<void> {
+    this.logger.log(`Submitting 'CreateUser' as ${orgMspId} for username: ${username}`);
+    const { gateway, client } = await this.connect(orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+      // Include the passwordHash in the chaincode call so chaincode can store or verify it securely
+  const txArgs = this.prepareArgs([username, fullName, email, role, organization, passwordHash]);
+  await contract.submitTransaction('CreateUser', ...txArgs);
+      this.logger.log(`Transaction 'CreateUser' committed successfully.`);
+    } catch (error) {
+      this.logger.error("Failed to submit 'CreateUser' transaction", error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  async queryUser(username: string, orgMspId: OrgMspId): Promise<string> {
+    this.logger.log(`Evaluating 'QueryUser' as ${orgMspId} for username: ${username}`);
+    const { gateway, client } = await this.connect(orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+  const evalArgs = this.prepareArgs([username]);
+  const resultBytes = await contract.evaluateTransaction('QueryUser', ...evalArgs);
+      const result = Buffer.from(resultBytes).toString('utf-8');
+      this.logger.log(`Transaction 'QueryUser' evaluated successfully.`);
+      return result;
+    } catch (error) {
+      this.logger.error("Failed to evaluate 'QueryUser' transaction", error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  // --- Case operations ---
+  async createCase(
+    id: string,
+    title: string,
+    description: string,
+    jurisdiction: string,
+    caseType: string,
+    policyId: string,
+    orgMspId: OrgMspId,
+  ): Promise<void> {
+    this.logger.log(`Submitting 'CreateCase' as ${orgMspId} for ID: ${id}`);
+    const { gateway, client } = await this.connect(orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+  const txArgs = this.prepareArgs([id, title, description, jurisdiction, caseType, policyId]);
+  await contract.submitTransaction('CreateCase', ...txArgs);
+      this.logger.log(`Transaction 'CreateCase' committed successfully.`);
+    } catch (error) {
+      this.logger.error("Failed to submit 'CreateCase' transaction", error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  async queryRecord(id: string, orgMspId: OrgMspId, userRole?: string): Promise<string> {
+    this.logger.log(`Evaluating 'QueryRecord' as ${orgMspId} (role: ${userRole}) for ID: ${id}`);
+    const { gateway, client } = await this.connect(orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+      const evalArgs = this.prepareArgs([id, userRole || '']);
+      const resultBytes = await contract.evaluateTransaction('QueryRecord', ...evalArgs);
+      const result = Buffer.from(resultBytes).toString('utf-8');
+      this.logger.log(`Transaction 'QueryRecord' evaluated successfully.`);
+      return result;
+    } catch (error) {
+      this.logger.error("Failed to evaluate 'QueryCase' transaction", error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  async queryAllCases(filtersJSON: string, userRole: string, orgMspId: OrgMspId): Promise<string> {
+    this.logger.log(`Evaluating 'QueryAllCases' as ${orgMspId} with filters`);
+    const { gateway, client } = await this.connect(orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+  const evalArgs = this.prepareArgs([filtersJSON, userRole]);
+  const resultBytes = await contract.evaluateTransaction('QueryAllCases', ...evalArgs);
+      const result = Buffer.from(resultBytes).toString('utf-8');
+      this.logger.log(`Transaction 'QueryAllCases' evaluated successfully.`);
+      return result;
+    } catch (error) {
+      this.logger.error("Failed to evaluate 'QueryAllCases' transaction", error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  async deleteCase(id: string, orgMspId: OrgMspId): Promise<void> {
+    this.logger.log(`Submitting 'DeleteCase' as ${orgMspId} for ID: ${id}`);
+    const { gateway, client } = await this.connect(orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+      const txArgs = this.prepareArgs([id]);
+      await contract.submitTransaction('DeleteCase', ...txArgs);
+      this.logger.log(`Transaction 'DeleteCase' committed successfully.`);
+    } catch (error) {
+      this.logger.error("Failed to submit 'DeleteCase' transaction", error);
+      throw error;
+    } finally {
+      this.closeConnection(gateway, client);
+    }
+  }
+
+  /**
+   * Queries a case from the chaincode
+   */
+  async queryCase(id: string, userRole: string, orgMspId: OrgMspId): Promise<string> {
+    this.logger.log(`Evaluating 'QueryCase' as ${orgMspId} for ID: ${id}`);
+    const { gateway, client } = await this.connect(orgMspId);
+    try {
+      const network = gateway.getNetwork(this.channelName);
+      const contract = network.getContract(this.chaincodeName);
+      const evalArgs = this.prepareArgs([id, userRole]);
+      const resultBytes = await contract.evaluateTransaction('QueryCase', ...evalArgs);
+      const result = Buffer.from(resultBytes).toString('utf-8');
+      this.logger.log(`Transaction 'QueryCase' evaluated successfully.`);
+      return result;
+    } catch (error) {
+      this.logger.error("Failed to evaluate 'QueryCase' transaction", error);
       throw error;
     } finally {
       this.closeConnection(gateway, client);
