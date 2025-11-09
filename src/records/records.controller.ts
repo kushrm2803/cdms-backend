@@ -159,6 +159,7 @@ export class RecordsController {
   async getRecordsByCase(
     @Param('caseId') caseId: string,
     @Query('org') orgMspId: string,
+    @Request() req: any,
   ) {
   const org = normalizeOrgMspId(orgMspId);
     if (!org) {
@@ -166,7 +167,13 @@ export class RecordsController {
     }
 
     try {
-  return await this.recordsService.getRecordsByCase(caseId, org as 'Org1MSP' | 'Org2MSP');
+      const { role: userRole, organization: userOrg } = req.user;
+      return await this.recordsService.getRecordsByCase(
+        caseId,
+        org as 'Org1MSP' | 'Org2MSP',
+        userRole,
+        userOrg,
+      );
     } catch (error) {
       if (error.message.includes('access denied')) {
         throw new ForbiddenException(error.message);

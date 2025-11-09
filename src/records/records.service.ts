@@ -35,6 +35,16 @@ export class RecordsService {
       return true;
     }
 
+    // Judges should be allowed to create records for their own organization as well
+    if (userRole === 'judge' && userOrg === ownerOrg) {
+      return true;
+    }
+
+    // Forensic members can create records for their own organization
+    if (userRole === 'forensic' && userOrg === ownerOrg) {
+      return true;
+    }
+
     // Other roles cannot create records
     return false;
   }
@@ -72,21 +82,41 @@ export class RecordsService {
         return;
       }
 
-      // Check org-based access
-      if (userOrg !== caseData.ownerOrg) {
-        throw new Error('Access denied: Case belongs to a different organization');
+      const caseOwnerOrg = caseData.organization || caseData.ownerOrg;
+      this.logger.debug(`Comparing organizations - User Org: ${userOrg}, Case Owner Org: ${caseOwnerOrg}`);
+      
+      // Check org-based access (normalize both to MSP ID format)
+      const caseOwnerMspId = caseOwnerOrg.includes('MSP') ? caseOwnerOrg : `${caseOwnerOrg}MSP`;
+      if (userOrg !== caseOwnerMspId) {
+        throw new Error(`Access denied: Case belongs to ${caseOwnerMspId}, but user is from ${userOrg}`);
       }
 
-      // Additional role-based checks can be added here
-      switch (userRole) {
+      // Role-based access checks
+      switch(userRole) {
         case 'investigator':
-          // Investigators can access cases they're assigned to
-          if (!caseData.investigators?.includes(userOrg)) {
-            throw new Error('Access denied: Not assigned to this case');
+          // Special check for investigator assignments if they exist
+          if (Array.isArray(caseData.investigators) && caseData.investigators.length > 0) {
+            const investigatorsNormalized = caseData.investigators.map((i: string) =>
+              i.includes('MSP') ? i : `${i}MSP`
+            );
+            if (!investigatorsNormalized.includes(userOrg)) {
+              throw new Error('Access denied: Not assigned to this case');
+            }
           }
-          break;
-        // Add more role checks as needed
+          // If no investigators list present or check passed, allow access (org check passed above)
+          return;
+
+        case 'judge':
+        case 'forensic':
+          // These roles can access cases from their org (we already checked org match above)
+          return;
+        
+        case 'admin':
+          // Admin was already handled at the start of the method
+          return;
+
         default:
+          // Any other role is denied
           throw new Error(`Access denied: Role ${userRole} cannot access cases`);
       }
     } catch (error) {
@@ -344,18 +374,26 @@ export class RecordsService {
     return `This action removes a #${id} record`;
   }
 
-  async getRecordsByCase(caseId: string, orgMspId: 'Org1MSP' | 'Org2MSP') {
+  async getRecordsByCase(
+    caseId: string,
+    orgMspId: 'Org1MSP' | 'Org2MSP',
+    userRole: string,
+    userOrg: string,
+  ) {
     if (!orgMspId) {
       throw new Error('Organization MSP ID is required to access records');
     }
 
-    this.logger.log(`Getting records for case ${caseId} as ${orgMspId}`);
+    this.logger.log(`Getting records for case ${caseId} as ${orgMspId} (role: ${userRole}, org: ${userOrg})`);
     try {
+      // Validate that the caller has access to the case
+      await this.validateCaseAccess(caseId, orgMspId, userRole, userOrg);
+
       const records = await this.fabricService.queryRecordsByCase(caseId, orgMspId);
       return JSON.parse(records);
     } catch (error) {
       if (error.message.includes('access denied')) {
-        throw new Error(`Access denied: Organization ${orgMspId} is not allowed to access these records`);
+        throw new Error(`Access denied: ${error.message}`);
       }
       this.logger.error(`Failed to get records for case ${caseId}`, error);
       throw error;
