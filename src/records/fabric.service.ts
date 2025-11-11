@@ -22,13 +22,14 @@ export interface RecordPayload {
   ownerOrg: string;
   createdAt: string;
   policyId: string;
+  description?: string;
 }
 
 @Injectable()
 export class FabricService {
   private readonly logger = new Logger(FabricService.name);
   private readonly channelName = 'mychannel';
-  private readonly chaincodeName = 'cdms-chaincode';
+  private readonly chaincodeName = 'cdms';
   private readonly mspIdOrg1 = 'Org1MSP';
   private readonly mspIdOrg2 = 'Org2MSP';
   
@@ -163,6 +164,7 @@ export class FabricService {
         payload.ownerOrg,
         payload.createdAt,
         payload.policyId,
+        payload.description || '',
       ]);
       await contract.submitTransaction('CreateRecord', ...txArgs);
       this.logger.log(`Transaction 'CreateRecord' committed successfully.`);

@@ -24,6 +24,7 @@ type Record struct {
     OwnerOrg    string `json:"ownerOrg"`
     CreatedAt   string `json:"createdAt"`
     PolicyID    string `json:"policyId"`
+    Description string `json:"description"`
 }
 
 // (rules removed) Using simplified policy: AllowedOrgs and AllowedRoles arrays
@@ -480,7 +481,7 @@ func (s *SmartContract) DeleteCase(ctx contractapi.TransactionContextInterface, 
 // --------------------------- RECORDS --------------------------------
 
 // CreateRecord stores a Record. Backend should supply createdAt and ownerOrg.
-func (s *SmartContract) CreateRecord(ctx contractapi.TransactionContextInterface, id, caseId, recordType, fileHash, offChainUri, ownerOrg, createdAt, policyId string) error {
+func (s *SmartContract) CreateRecord(ctx contractapi.TransactionContextInterface, id, caseId, recordType, fileHash, offChainUri, ownerOrg, createdAt, policyId, description string) error {
     key := "record:" + id
     exists, err := ctx.GetStub().GetState(key)
     if err != nil {
@@ -500,6 +501,7 @@ func (s *SmartContract) CreateRecord(ctx contractapi.TransactionContextInterface
         OwnerOrg:    ownerOrg,
         CreatedAt:   createdAt,
         PolicyID:    policyId,
+        Description: description,
     }
 
     recJSON, err := json.Marshal(rec)
@@ -713,6 +715,9 @@ func (s *SmartContract) UpdateRecordMetadata(ctx contractapi.TransactionContextI
     }
     if v, ok := updates["ownerOrg"].(string); ok {
         rec.OwnerOrg = v
+    }
+    if v, ok := updates["description"].(string); ok {
+        rec.Description = v
     }
     // Accept other metadata fields as needed.
 
