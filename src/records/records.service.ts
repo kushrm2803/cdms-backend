@@ -387,11 +387,25 @@ export class RecordsService {
 
     this.logger.log(`Getting records for case ${caseId} as ${orgMspId} (role: ${userRole}, org: ${userOrg})`);
     try {
-      // Validate that the caller has access to the case
-      await this.validateCaseAccess(caseId, orgMspId, userRole, userOrg);
+      // NOTE: Align access checks with `findAll` so record-level policies govern visibility.
+      // Older logic enforced case-level ownership via validateCaseAccess which could block
+      // users even when record policies allowed access. We now query records for the case
+      // and apply the same per-record policy filtering as in `findAll`.
 
-      const records = await this.fabricService.queryRecordsByCase(caseId, orgMspId);
-      return JSON.parse(records);
+      const recordsJson = await this.fabricService.queryRecordsByCase(caseId, orgMspId);
+      const records = JSON.parse(recordsJson);
+
+      const accessibleRecords: any[] = [];
+      for (const record of records) {
+        try {
+          await this.validateRecordAccess(record, userRole, userOrg);
+          accessibleRecords.push(record);
+        } catch (err) {
+          this.logger.debug(`Skipping record ${record.id} for case ${caseId}: ${err.message}`);
+        }
+      }
+
+      return accessibleRecords;
     } catch (error) {
       if (error.message.includes('access denied')) {
         throw new Error(`Access denied: ${error.message}`);
