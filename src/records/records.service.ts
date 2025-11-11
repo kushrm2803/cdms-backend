@@ -218,6 +218,7 @@ export class RecordsService {
         ownerOrg: createRecordDto.ownerOrg,
         createdAt: createdAt,
         policyId: policyId,
+        description: createRecordDto.description || '',
       };
 
       // Validate case access if caseId is provided
