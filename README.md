@@ -4,6 +4,10 @@ This document provides instructions for setting up and running the NestJS backen
 
 This backend service provides REST APIs that interact with a Hyperledger Fabric blockchain for on-chain data and MinIO for off-chain encrypted file storage. The system is designed to connect law enforcement (Org1) and non - police (Org2) organizations.
 
+> **Detailed Setup Guide:** Refer to the complete step-by-step instructions in the PDF available here: **[https://drive.google.com/file/d/1IL2ofHtzavJ69p9TSUYH7BD4KFO_O0vc/view?usp=drive_link]**
+
+> **Demo Video:** Watch the setup and execution demo here: **[https://drive.google.com/file/d/1B99f9jyfzrwNJm850XG8fRZxdl7kESn_/view?usp=sharing]**
+
 > **Note:** All project code is located in the `v2` branch.
 
 ## Prerequisites
